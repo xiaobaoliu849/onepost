@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OnePost — Douyin · Shipinhao · Weibo · X</title>
+  <link rel="stylesheet" href="/static/styles.css?v=2.3" />
+</head>
+<body>
+  <div class="ambient-glow" aria-hidden="true"></div>
+
+  <div class="app-container">
+    <!-- Top Glass Navigation -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <div class="logo-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M7 5.5C7 4.67 7.94 4.19 8.61 4.68L18.15 11.68C18.7 12.08 18.7 12.92 18.15 13.32L8.61 20.32C7.94 20.81 7 20.33 7 19.5V5.5Z" fill="currentColor"/>
+            <rect x="19.5" y="5" width="2.2" height="15" rx="1.1" fill="currentColor" opacity="0.55"/>
+          </svg>
+        </div>
+        <div class="brand-copy">
+          <div class="brand-row">
+            <h1>OnePost</h1>
+            <span class="studio-chip">STUDIO</span>
+          </div>
+          <p>One-prompt distribution for your finished video, poster card &amp; karaoke subtitles</p>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <button id="btnChromeBridge" class="btn btn-chrome-bridge" title="Open real Google Chrome &amp; sync your live login sessions">
+          <span class="chrome-live-dot" id="chromeBridgeDot"></span>
+          <span id="chromeBridgeLabel">Open Real Chrome &amp; Sync</span>
+        </button>
+
+        <button id="btnLoadDemo" class="btn btn-soft">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6l-5 3.6 1.9-5.8L4 8.8h6.1L12 3z"/>
+          </svg>
+          <span>Try Demo Bundle</span>
+        </button>
+
+        <button id="btnRefreshAccounts" class="btn btn-ghost" title="Refresh account sessions">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+            <path d="M16 16h5v5"/>
+          </svg>
+          <span>Sync</span>
+        </button>
+
+        <button id="btnThemeToggle" class="btn btn-icon-round" title="Switch Light / Dark Studio Theme" aria-label="Toggle theme">
+          <svg id="iconMoon" class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+
+        <button id="btnOpenSettings" class="btn btn-outline">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.05 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span>Settings</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Sleek Connected Channels Ribbon -->
+    <section class="channels-ribbon" id="accountStrip" aria-label="Connected social channels">
+      <!-- Rendered dynamically by app.js -->
+    </section>
+
+    <!-- Main Studio Layout -->
+    <main class="studio-main">
+      <!-- LEFT STAGE: Source Bundle, Cinema Karaoke Monitor & Poster Gallery -->
+      <aside class="stage-column">
+        <!-- Card 1: Bundle Drop & Folder Scanner -->
+        <div class="surface-card">
+          <div class="card-head">
+            <div>
+              <span class="step-pill">01 &middot; Source Bundle</span>
+              <h2>Load Ready Assets</h2>
+            </div>
+            <span id="bundleBadge" class="badge badge-neutral">Awaiting files</span>
+          </div>
+
+          <div class="folder-search">
+            <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <input
+              type="text"
+              id="inputFolderPath"
+              placeholder="Paste output folder path (e.g. D:\Highlights\Ep04)..."
+            />
+            <button id="btnScanFolder" class="btn btn-dark btn-sm">Scan</button>
+          </div>
+
+          <div id="dropZone" class="upload-tile">
+            <input type="file" id="fileInputBundle" multiple accept=".mp4,.mov,.mkv,.webm,.png,.jpg,.jpeg,.webp,.srt,.ass,.vtt" hidden />
+            <div class="upload-tile-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="upload-tile-text">
+              <strong>Drop Video + Poster Card + Karaoke SRT</strong>
+              <span>Auto-detects <code>.mp4</code>, <code>poster.png</code> &amp; <code>karaoke.srt</code></span>
+            </div>
+          </div>
+
+          <!-- Optional multi-file picker if folder has several candidates -->
+          <div id="candidateSelectors" class="candidate-grid hidden">
+            <label>
+              <span>Video</span>
+              <select id="selVideo"></select>
+            </label>
+            <label>
+              <span>Poster</span>
+              <select id="selPoster"></select>
+            </label>
+            <label>
+              <span>Subtitle</span>
+              <select id="selSubtitle"></select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Card 2: Cinema Player + Floating Frosted Karaoke Caption Dock -->
+        <div class="surface-card cinema-card">
+          <div class="cinema-frame">
+            <video id="videoPreview" controls preload="metadata"></video>
+
+            <div id="videoEmptyState" class="cinema-placeholder">
+              <div class="cinema-placeholder-orb">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+              </div>
+              <strong>Cinema &amp; Karaoke Preview</strong>
+              <p>Click <em>Try Demo Bundle</em> above or scan your highlight folder to preview synced karaoke subtitles.</p>
+            </div>
+
+            <!-- Floating Karaoke Glass Overlay -->
+            <div class="karaoke-glass-bar">
+              <div class="karaoke-meta-row">
+                <span class="karaoke-live-pill" id="karaokeStatusBadge">KARAOKE READY</span>
+                <span class="video-spec-pill" id="videoSpecsLabel">--</span>
+              </div>
+              <div id="karaokeLiveLine" class="karaoke-caption-line">
+                Synced English karaoke highlights will appear here during playback
+              </div>
+            </div>
+          </div>
+
+          <!-- Extracted 00:00 Teaser Hook Callout -->
+          <div id="teaserHookBox" class="teaser-callout hidden">
+            <div class="teaser-callout-badge">00:00 TEASER HOOK</div>
+            <p id="teaserHookText"></p>
+          </div>
+        </div>
+
+        <!-- Card 3: Side-by-Side Poster Card Framing Gallery -->
+        <div class="surface-card">
+          <div class="card-head compact">
+            <div>
+              <h3>Poster Card Framing</h3>
+              <p class="card-sub">Ambient-blur framed so zero title typography gets cut off</p>
+            </div>
+          </div>
+
+          <div class="poster-gallery" id="posterGallery">
+            <button type="button" class="poster-thumb active" data-variant="portrait_3x4">
+              <div class="thumb-frame ratio-3x4">
+                <img id="thumb_portrait_3x4" alt="3:4 cover" class="hidden" />
+                <span class="thumb-empty">3:4</span>
+              </div>
+              <span class="thumb-caption">3:4 Douyin &amp; Shipinhao</span>
+            </button>
+
+            <button type="button" class="poster-thumb" data-variant="landscape_4x3">
+              <div class="thumb-frame ratio-4x3">
+                <img id="thumb_landscape_4x3" alt="4:3 cover" class="hidden" />
+                <span class="thumb-empty">4:3</span>
+              </div>
+              <span class="thumb-caption">4:3 Dual Cover</span>
+            </button>
+
+            <button type="button" class="poster-thumb" data-variant="weibo_cover">
+              <div class="thumb-frame ratio-16x9">
+                <img id="thumb_weibo_cover" alt="16:9 cover" class="hidden" />
+                <span class="thumb-empty">16:9</span>
+              </div>
+              <span class="thumb-caption">16:9 Weibo Cover</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- RIGHT STAGE: Magic One-Prompt Composer & 4-Platform Studio Cards -->
+      <section class="composer-column">
+        <!-- Magic AI Single-Prompt Bar -->
+        <div class="magic-composer">
+          <div class="magic-top">
+            <div class="magic-title-group">
+              <span class="step-pill">02 &middot; AI Copy Adaptation</span>
+              <h2>One Prompt &rarr; Four Native Voices</h2>
+            </div>
+            <span id="copySourceBadge" class="badge badge-accent">Ready</span>
+          </div>
+
+          <div class="magic-input-wrap">
+            <svg class="sparkle-icon" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L14.2 8.8L21 11L14.2 13.2L12 20L9.8 13.2L3 11L9.8 8.8L12 2Z" fill="currentColor"/>
+            </svg>
+            <input
+              type="text"
+              id="inputUserHint"
+              placeholder="Tell AI the angle once (e.g. 'Focus on the counter-intuitive hook in the first 15 seconds')..."
+            />
+            <button id="btnGenerateCopy" class="btn btn-magic">
+              <span>Rewrite All 4</span>
+            </button>
+          </div>
+
+          <div class="tone-chips">
+            <span class="tone-label">Quick angle:</span>
+            <button type="button" class="tone-chip" data-prompt="突出开头前15秒最反直觉的高能悬念，引发评论区讨论">🔥 Viral Hook</button>
+            <button type="button" class="tone-chip" data-prompt="提炼3分钟精剪里的核心认知干货，适合收藏反复观看">💡 Deep Insight</button>
+            <button type="button" class="tone-chip" data-prompt="强调沉浸式逐词高亮卡拉OK英文字幕，地道口语表达">🎧 Bilingual Karaoke</button>
+            <button type="button" class="tone-chip" data-prompt="极简克制、高信息密度总结核心看点">⚡ Crisp &amp; Minimal</button>
+          </div>
+        </div>
+
+        <!-- Subtle Notice Banner -->
+        <div id="warningBanner" class="notice-banner hidden"></div>
+
+        <!-- 2x2 Platform Studio Cards -->
+        <div class="platform-cards-grid">
+          <!-- 1. DOUYIN -->
+          <article class="p-card" data-plat="douyin">
+            <header class="p-card-header">
+              <div class="p-identity">
+                <div class="p-icon p-icon-douyin" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5c-1.42 0-2.6-1.16-2.6-2.6 0-1.72 1.66-3.01 3.37-2.48V9.66c-3.45-.46-6.47 2.22-6.47 5.64 0 3.33 2.76 5.7 5.69 5.7 3.14 0 5.69-2.55 5.69-5.7V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3s-1.88.09-3.24-1.48z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3>Douyin <span class="cn-sub">抖音</span></h3>
+                  <span class="net-tag">Direct CN IP &middot; Dual 3:4 + 4:3 Cover</span>
+                </div>
+              </div>
+              <label class="ios-switch" title="Include Douyin in publish batch">
+                <input type="checkbox" id="chk_douyin" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </header>
+
+            <div class="p-field">
+              <div class="p-label-bar">
+                <label for="dy_title">Hook Headline</label>
+                <div class="ring-meter" id="ring_dy_title"><span id="cnt_dy_title">0/30</span></div>
+              </div>
+              <input type="text" id="dy_title" class="clean-input title-weight" maxlength="35" placeholder="28字内高能钩子标题..." />
+            </div>
+
+            <div class="p-field">
+              <label for="dy_desc">Caption</label>
+              <textarea id="dy_desc" class="clean-textarea" rows="3" placeholder="吸引完播、评论与收藏的作品简介..."></textarea>
+            </div>
+
+            <div class="p-field">
+              <label>Topic Hashtags <span class="hint-inline">(Enter to add)</span></label>
+              <div class="tag-composer" data-target="dy_tags">
+                <div class="tag-pills" id="pills_dy_tags"></div>
+                <input type="text" class="tag-ghost-input" placeholder="+话题" />
+              </div>
+              <input type="hidden" id="dy_tags" />
+            </div>
+          </article>
+
+          <!-- 2. SHIPINHAO -->
+          <article class="p-card" data-plat="shipinhao">
+            <header class="p-card-header">
+              <div class="p-identity">
+                <div class="p-icon p-icon-shipinhao" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+                    <path d="M12 12c-2-2.8-4.5-4.5-7-4.5C3.1 7.5 2 9.2 2 12s1.1 4.5 3 4.5c2.5 0 5-1.7 7-4.5zm0 0c2 2.8 4.5 4.5 7 4.5 1.9 0 3-1.7 3-4.5s-1.1-4.5-3-4.5c-2.5 0-5 1.7-7 4.5z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3>Shipinhao <span class="cn-sub">视频号</span></h3>
+                  <span class="net-tag">Direct CN IP &middot; WeChat Ecosystem</span>
+                </div>
+              </div>
+              <label class="ios-switch" title="Include Shipinhao in publish batch">
+                <input type="checkbox" id="chk_shipinhao" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </header>
+
+            <div class="p-split-2">
+              <div class="p-field">
+                <div class="p-label-bar">
+                  <label for="sp_short">Short Title (6–16字)</label>
+                  <div class="ring-meter" id="ring_sp_short"><span id="cnt_sp_short">0/16</span></div>
+                </div>
+                <input type="text" id="sp_short" class="clean-input title-weight" maxlength="20" placeholder="精剪深度解读" />
+              </div>
+
+              <div class="p-field">
+                <div class="p-label-bar">
+                  <label for="sp_title">Full Headline</label>
+                  <div class="ring-meter" id="ring_sp_title"><span id="cnt_sp_title">0/30</span></div>
+                </div>
+                <input type="text" id="sp_title" class="clean-input" maxlength="35" placeholder="完整视频标题" />
+              </div>
+            </div>
+
+            <div class="p-field">
+              <label for="sp_desc">Moments-Friendly Summary</label>
+              <textarea id="sp_desc" class="clean-textarea" rows="2" placeholder="适合微信好友转发与朋友圈分享的精炼文案..."></textarea>
+            </div>
+
+            <div class="p-footer-row">
+              <div class="tag-composer flex-1" data-target="sp_tags">
+                <div class="tag-pills" id="pills_sp_tags"></div>
+                <input type="text" class="tag-ghost-input" placeholder="+话题" />
+              </div>
+              <input type="hidden" id="sp_tags" />
+
+              <label class="pill-check" title="Save to WeChat Channels Drafts without publishing live">
+                <input type="checkbox" id="opt_sp_draft" />
+                <span>Draft Only</span>
+              </label>
+            </div>
+          </article>
+
+          <!-- 3. WEIBO -->
+          <article class="p-card" data-plat="weibo">
+            <header class="p-card-header">
+              <div class="p-identity">
+                <div class="p-icon p-icon-weibo" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10.09 16.75c-2.66.26-4.96-1.01-5.14-2.85-.18-1.84 1.83-3.54 4.49-3.8 2.66-.26 4.96 1.01 5.14 2.85.18 1.84-1.83 3.54-4.49 3.8zm10.22-6.11c-.41-.13-.69-.22-.48-.79.46-1.17.51-2.18.01-2.9-.95-1.36-3.55-1.29-6.48-.04 0 0-.93.41-.69-.33.45-1.46.38-2.68-.32-3.39-1.59-1.6-5.82.06-9.45 3.7C.21 9.58-.8 12.44-.8 14.87c0 4.08 5.23 6.56 10.35 6.56 6.71 0 11.17-3.9 11.17-7 0-1.87-1.57-2.93-2.41-3.79z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3>Weibo <span class="cn-sub">新浪微博</span></h3>
+                  <span class="net-tag">Direct CN IP &middot; 16:9 HD Cover</span>
+                </div>
+              </div>
+              <label class="ios-switch" title="Include Weibo in publish batch">
+                <input type="checkbox" id="chk_weibo" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </header>
+
+            <div class="p-field">
+              <div class="p-label-bar">
+                <label for="wb_title">Video Title (&le;30 chars)</label>
+                <div class="ring-meter" id="ring_wb_title"><span id="cnt_wb_title">0/30</span></div>
+              </div>
+              <input type="text" id="wb_title" class="clean-input title-weight" maxlength="35" placeholder="微博视频标题（30字内）..." />
+            </div>
+
+            <div class="p-field">
+              <label for="wb_desc">Post Commentary &amp; #Topics#</label>
+              <textarea id="wb_desc" class="clean-textarea" rows="3" placeholder="#双语精剪# 片头高能预警 + 时间轴看点..."></textarea>
+            </div>
+
+            <div class="p-field">
+              <label>Video Tags</label>
+              <div class="tag-composer" data-target="wb_tags">
+                <div class="tag-pills" id="pills_wb_tags"></div>
+                <input type="text" class="tag-ghost-input" placeholder="+标签" />
+              </div>
+              <input type="hidden" id="wb_tags" />
+            </div>
+          </article>
+
+          <!-- 4. X (TWITTER) -->
+          <article class="p-card" data-plat="x">
+            <header class="p-card-header">
+              <div class="p-identity">
+                <div class="p-icon p-icon-x" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3>X <span class="cn-sub">Global Feed</span></h3>
+                  <span class="net-tag net-tag-proxy" id="xRouteBadge">Proxy Route</span>
+                </div>
+              </div>
+              <label class="ios-switch" title="Include X in publish batch">
+                <input type="checkbox" id="chk_x" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </header>
+
+            <div class="p-field flex-grow">
+              <div class="p-label-bar">
+                <label for="x_text">English Hook &amp; Takeaways</label>
+                <div class="x-ring-wrap">
+                  <svg class="progress-ring" width="20" height="20" viewBox="0 0 20 20">
+                    <circle class="ring-track" cx="10" cy="10" r="8" />
+                    <circle class="ring-fill" id="xRingCircle" cx="10" cy="10" r="8" stroke-dasharray="50.26" stroke-dashoffset="50.26" />
+                  </svg>
+                  <span class="ring-num" id="cnt_x_text">0/280</span>
+                </div>
+              </div>
+              <textarea id="x_text" class="clean-textarea x-textarea" rows="5" placeholder="Sharp English teaser hook + crisp takeaways + #hashtags..."></textarea>
+            </div>
+
+            <div class="p-footer-row">
+              <label class="pill-check">
+                <input type="checkbox" id="opt_x_long" />
+                <span>X Premium Long Post</span>
+              </label>
+              <span class="tier-note" id="xTierHint">3–5m HD Ready</span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <!-- Floating Bottom Command & Activity Dock -->
+    <footer class="publish-dock">
+      <div class="dock-bar">
+        <div class="dock-left">
+          <div class="schedule-pill">
+            <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <input type="text" id="optSchedule" placeholder="Optional schedule: YYYY-MM-DD HH:MM" />
+          </div>
+
+          <label class="pill-check">
+            <input type="checkbox" id="optVisibleBrowser" checked />
+            <span>Show Browser Window</span>
+          </label>
+
+          <button type="button" id="btnToggleDrawer" class="btn-drawer-toggle">
+            <span class="pulse-dot" id="dockStatusDot"></span>
+            <span id="dockSummaryText">Activity Console</span>
+            <div id="jobPlatformPills" class="dock-pills"></div>
+          </button>
+        </div>
+
+        <div class="dock-right">
+          <button id="btnDryRun" class="btn btn-outline">
+            <span>Preflight Check</span>
+          </button>
+          <button id="btnPublishAll" class="btn btn-publish">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+            <span>Publish Selected (4)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Expandable Activity Drawer -->
+      <div id="activityDrawer" class="activity-drawer hidden">
+        <div class="drawer-head">
+          <span>Live Dispatch Log</span>
+          <button type="button" id="btnCloseDrawer" class="btn-text-xs">Collapse</button>
+        </div>
+        <pre id="jobLogs" class="drawer-logs">Ready. Load a bundle and run Preflight Check or Publish Selected.</pre>
+      </div>
+    </footer>
+  </div>
+
+  <!--Poster Lightbox Preview-->
+  <div id="posterLightbox" class="modal-overlay hidden">
+    <div class="lightbox-inner">
+      <img id="posterPreviewImg" alt="Full poster preview" />
+      <button type="button" id="btnCloseLightbox" class="btn btn-soft">Close Preview</button>
+    </div>
+  </div>
+
+  <!-- Real Chrome Sync & Cookie Import Modal -->
+  <div id="connectModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="connect-sheet">
+      <div class="sheet-header">
+        <div>
+          <h2 id="connectModalTitle">Connect Account via Real Chrome</h2>
+          <p class="card-sub" id="connectModalSubtitle">Use your real Chrome login status — zero headless QR glitches</p>
+        </div>
+        <button type="button" id="btnCloseConnectModal" class="btn btn-icon-round" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="connect-tabs">
+        <button type="button" class="c-tab active" data-ctab="chrome">1. Real Chrome Sync (Recommended)</button>
+        <button type="button" class="c-tab" data-ctab="paste">2. Paste Cookies from Chrome</button>
+      </div>
+
+      <!-- Tab 1: Real Studio Chrome Bridge -->
+      <div id="tabChromeBridge" class="connect-body">
+        <div class="x-guide-box">
+          <strong>Why this never glitches on QR scans:</strong>
+          <ol>
+            <li>Click <strong>Open Real Chrome</strong> below — it opens your genuine Google Chrome with a permanent profile (Douyin, Shipinhao, Weibo &amp; X tabs).</li>
+            <li>Log in or scan QR normally inside that real Chrome window once — your login stays saved permanently!</li>
+            <li>Click <strong>Sync Chrome Login Now</strong> — OnePost reads your live Chrome login and publishes directly inside your Chrome!</li>
+          </ol>
+        </div>
+
+        <div class="qr-actions">
+          <button type="button" id="btnModalOpenChrome" class="btn btn-dark">1. Open Real Chrome</button>
+          <button type="button" id="btnModalSyncChrome" class="btn btn-publish">2. Sync Chrome Login Now</button>
+        </div>
+
+        <p id="chromeSyncStatusMsg" class="qr-hint-text">Checking Studio Chrome status...</p>
+        <p class="bat-fallback-note">
+          Tip: If Windows keeps the Chrome window minimized, you can also double-click <code>open_chrome.bat</code> in your project folder.
+        </p>
+      </div>
+
+      <!-- Tab 2: Universal Cookie Paste from Everyday Chrome -->
+      <div id="tabCookiePaste" class="connect-body hidden">
+        <div id="xSpecificFields" class="hidden">
+          <div class="x-guide-box">
+            <strong>Quick X Cookie Paste:</strong> In your logged-in Chrome on <code>x.com</code>, press <kbd>F12</kbd> &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> &rarr; paste <code>auth_token</code> &amp; <code>ct0</code> (or use universal paste below):
+          </div>
+          <div class="p-split-2 mt-10">
+            <div class="p-field">
+              <label for="inputXAuthToken"><code>auth_token</code></label>
+              <input type="password" id="inputXAuthToken" class="clean-input" placeholder="auth_token..." />
+            </div>
+            <div class="p-field">
+              <label for="inputXCt0"><code>ct0</code></label>
+              <input type="text" id="inputXCt0" class="clean-input" placeholder="ct0..." />
+            </div>
+          </div>
+          <div class="qr-actions mt-10">
+            <button type="button" id="btnSaveXCookies" class="btn btn-outline btn-sm">Save X Tokens</button>
+          </div>
+        </div>
+
+        <div class="p-field">
+          <label for="inputRawCookies">Paste <strong>Cookie-Editor JSON</strong> or DevTools <strong>Copy as cURL</strong> from your logged-in Chrome:</label>
+          <textarea id="inputRawCookies" class="clean-textarea" rows="4" placeholder='Paste JSON from Cookie-Editor extension, or F12 -> Network -> Right-click request -> Copy as cURL...'></textarea>
+        </div>
+
+        <p id="pasteCookieMsg" class="qr-hint-text"></p>
+        <div class="qr-actions">
+          <button type="button" id="btnImportRawCookies" class="btn btn-publish">Import &amp; Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="settings-sheet">
+      <div class="sheet-header">
+        <div>
+          <h2>Studio Preferences</h2>
+          <p class="card-sub">Configure split-network safety, AI copywriter &amp; X publishing engine</p>
+        </div>
+        <button id="btnCloseSettings" class="btn btn-icon-round" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="sheet-body">
+        <div class="settings-section">
+          <h4>Split Network Routing</h4>
+          <p class="card-sub">Keep domestic accounts on clean CN Direct IP while routing X through your local proxy.</p>
+          <label class="setting-toggle-row">
+            <span>Force Direct CN IP (bypass proxy) for Douyin, Shipinhao &amp; Weibo</span>
+            <span class="ios-switch"><input type="checkbox" id="cfg_cn_direct" checked /><span class="switch-slider"></span></span>
+          </label>
+          <div class="p-split-2 mt-10">
+            <label class="setting-toggle-row">
+              <span>Enable Proxy for X (Twitter)</span>
+              <span class="ios-switch"><input type="checkbox" id="cfg_x_use_proxy" checked /><span class="switch-slider"></span></span>
+            </label>
+            <div class="p-field">
+              <label for="cfg_x_proxy">Local Proxy URL</label>
+              <input type="text" id="cfg_x_proxy" class="clean-input" placeholder="http://127.0.0.1:7890" />
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>AI Copywriting Model (DeepSeek / OpenAI / Qwen / Ollama)</h4>
+          <div class="p-split-2">
+            <div class="p-field">
+              <label for="cfg_ai_base">OpenAI-Compatible Base URL</label>
+              <input type="text" id="cfg_ai_base" class="clean-input" placeholder="https://api.deepseek.com/v1" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_ai_model">Model Name</label>
+              <input type="text" id="cfg_ai_model" class="clean-input" placeholder="deepseek-chat" />
+            </div>
+          </div>
+          <div class="p-field mt-10">
+            <label for="cfg_ai_key">API Key <span class="hint-inline">(Leave empty for built-in Smart SRT Composer)</span></label>
+            <input type="password" id="cfg_ai_key" class="clean-input" placeholder="sk-..." />
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>X (Twitter) Engine</h4>
+          <div class="p-split-2">
+            <div class="p-field">
+              <label for="cfg_x_mode">Connection Method</label>
+              <select id="cfg_x_mode" class="clean-input">
+                <option value="browser">Browser Cookie Session (Recommended &middot; Free)</option>
+                <option value="api">Official X API v2 + Chunked Media Upload</option>
+              </select>
+            </div>
+            <label class="setting-toggle-row">
+              <span>X Premium Account (3–5m+ HD video)</span>
+              <span class="ios-switch"><input type="checkbox" id="cfg_x_premium" checked /><span class="switch-slider"></span></span>
+            </label>
+          </div>
+          <div id="xApiKeysGroup" class="p-split-2 mt-10 hidden">
+            <div class="p-field">
+              <label for="cfg_x_apikey">Consumer API Key</label>
+              <input type="password" id="cfg_x_apikey" class="clean-input" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_x_apisecret">Consumer API Secret</label>
+              <input type="password" id="cfg_x_apisecret" class="clean-input" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_x_token">Access Token</label>
+              <input type="password" id="cfg_x_token" class="clean-input" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_x_tokensecret">Access Token Secret</label>
+              <input type="password" id="cfg_x_tokensecret" class="clean-input" />
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>Browser Executable &amp; Optional MultiPost Extension</h4>
+          <div class="p-field">
+            <label for="cfg_chrome_path">Chrome / Edge Path</label>
+            <input type="text" id="cfg_chrome_path" class="clean-input" placeholder="C:/Program Files/Google/Chrome/Application/chrome.exe" />
+          </div>
+          <div class="p-split-2 mt-10">
+            <label class="setting-toggle-row">
+              <span>Use MultiPost Extension Bridge</span>
+              <span class="ios-switch"><input type="checkbox" id="cfg_mp_enabled" /><span class="switch-slider"></span></span>
+            </label>
+            <div class="p-field">
+              <label for="cfg_mp_url">Extension Endpoint</label>
+              <input type="text" id="cfg_mp_url" class="clean-input" placeholder="http://127.0.0.1:10721/api/post" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sheet-footer">
+        <button id="btnSaveSettings" class="btn btn-publish">Save Preferences</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=2.3"></script>
+</body>
+</html>
