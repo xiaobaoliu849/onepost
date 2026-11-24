@@ -66,7 +66,7 @@ def save_x_tokens_cookie(account_name: str, auth_token: str, ct0: str) -> Path:
 def _build_launch_kwargs(settings: dict[str, Any], headless: bool) -> dict[str, Any]:
     chrome_path = (settings.get("chrome_path") or "").strip()
     net = settings.get("network") or {}
-    use_proxy = bool(net.get("x_use_proxy", True))
+    use_proxy = bool(net.get("x_use_proxy", False))
     proxy_url = (net.get("x_proxy_url") or "").strip()
 
     kwargs: dict[str, Any] = {
@@ -158,12 +158,13 @@ async def upload_x_video(
     account_name: str,
     settings: dict[str, Any],
     log: LogFn,
+    cdp_url: str = "",
 ) -> dict[str, Any]:
     x_cfg = settings.get("x_config") or {}
     mode = x_cfg.get("mode", "browser")
     if mode == "api":
         return await asyncio.to_thread(_upload_x_via_official_api, video_path, post_text, settings, log)
-    return await _upload_x_via_browser(video_path, post_text, account_name, settings, log)
+    return await _upload_x_via_browser(video_path, post_text, account_name, settings, log, cdp_url=cdp_url)
 
 
 async def _upload_x_via_browser(
@@ -172,12 +173,13 @@ async def _upload_x_via_browser(
     account_name: str,
     settings: dict[str, Any],
     log: LogFn,
+    cdp_url: str = "",
 ) -> dict[str, Any]:
     from patchright.async_api import async_playwright
 
     cookie_file = get_x_cookie_file(account_name)
-    cdp_url = os.environ.get("SAU_CDP_URL", "").strip()
-    if not cdp_url and not cookie_file.is_file():
+    resolved_cdp = (cdp_url or os.environ.get("SAU_CDP_URL", "")).strip()
+    if not resolved_cdp and not cookie_file.is_file():
         raise RuntimeError(
             f"X browser session not found ({cookie_file.name}). Click 'Connect' on the X card to sync from Chrome first."
         )
@@ -186,9 +188,9 @@ async def _upload_x_via_browser(
     launch_kwargs = _build_launch_kwargs(settings, headless=headless)
 
     async with async_playwright() as p:
-        if cdp_url:
-            log(f"[X] Attaching directly to your live Chrome ({cdp_url})...")
-            browser = await p.chromium.connect_over_cdp(cdp_url)
+        if resolved_cdp:
+            log(f"[X] Attaching directly to your live Chrome ({resolved_cdp})...")
+            browser = await p.chromium.connect_over_cdp(resolved_cdp)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
         else:
             proxy_info = launch_kwargs.get("proxy", {}).get("server", "System/TUN")
@@ -241,7 +243,7 @@ async def _upload_x_via_browser(
             log("[X] Video post submitted to X!")
             return {"status": "published", "platform": "x", "mode": "browser"}
         finally:
-            if cdp_url:
+            if resolved_cdp:
                 try:
                     await page.close()
                 except Exception:
@@ -260,7 +262,7 @@ def _upload_x_via_official_api(
 
     x_cfg = settings.get("x_config") or {}
     net = settings.get("network") or {}
-    use_proxy = bool(net.get("x_use_proxy", True))
+    use_proxy = bool(net.get("x_use_proxy", False))
     proxy_url = (net.get("x_proxy_url") or "").strip()
 
     old_http = os.environ.get("HTTP_PROXY")

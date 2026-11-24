@@ -39,16 +39,16 @@
 - [x] Wrap `DouYinVideo.upload` in `try...finally` tab/browser cleanup
 - [x] Add `tests/test_core_backend.py` & verify all tests pass
 
-### [/] Milestone 2: Publisher Orchestrator — Real Preflight, Cancellation & Concurrency Safety
-- [ ] Align `x_use_proxy` default (`False`) & pass explicit `cdp_url` into `upload_x_video` (no `os.environ` mutation)
-- [ ] Implement `validate_platform_preflight(...)` checking cookies, schedule syntax/future time, title lengths, Shipinhao `short_title` (6–16), Weibo required cover, and X length/duration/size limits
-- [ ] Upgrade `dry_run` execution to report real `success` / `warning` / `failed` states and `issues` list
-- [ ] Implement `cancel_job(job_id)`, `POST /api/jobs/{job_id}/cancel`, `POST /api/preflight`, and `auto_sync` guard on `GET /api/accounts`
-- [ ] Evict stale completed jobs from `ACTIVE_JOBS` (>25) and expose progress summary in `PublishJob.to_dict()`
-- [ ] Update `publish_cli.py` for preflight issue reporting and clean `KeyboardInterrupt` job cancellation
-- [ ] Add `tests/test_publisher_preflight.py` & verify all tests pass
+### [x] Milestone 2: Publisher Orchestrator — Real Preflight, Cancellation & Concurrency Safety
+- [x] Align `x_use_proxy` default (`False`) & pass explicit `cdp_url` into `upload_x_video` (no `os.environ` mutation)
+- [x] Implement `validate_platform_preflight(...)` checking cookies, schedule syntax/future time, title lengths, Shipinhao `short_title` (6–16), Weibo required cover, and X length/duration/size limits
+- [x] Upgrade `dry_run` execution to report real `success` / `warning` / `failed` states and `issues` list
+- [x] Implement `cancel_job(job_id)`, `POST /api/jobs/{job_id}/cancel`, `POST /api/preflight`, and `auto_sync` guard on `GET /api/accounts`
+- [x] Evict stale completed jobs from `ACTIVE_JOBS` (>25) and expose progress summary in `PublishJob.to_dict()`
+- [x] Update `publish_cli.py` for preflight issue reporting and clean `KeyboardInterrupt` job cancellation
+- [x] Add `tests/test_publisher_preflight.py` & verify all tests pass
 
-### [ ] Milestone 3: Frontend Upload Progress, 3-Slot Asset Manager & Interactive Karaoke/Poster Experience
+### [/] Milestone 3: Frontend Upload Progress, 3-Slot Asset Manager & Interactive Karaoke/Poster Experience
 - [ ] Add non-blocking Toast Notification stack (`#toastStack`)
 - [ ] Replace upload `fetch` with `XMLHttpRequest` progress + stage stepper + Cancel Upload button
 - [ ] Fix `dragDepth` dragover/dragleave flicker & add full-window drag-and-drop overlay

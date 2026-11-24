@@ -41,9 +41,11 @@ from app.config import (
     save_settings,
 )
 from app.publisher import (
+    cancel_job,
     get_all_accounts_status,
     get_job,
     list_recent_jobs,
+    run_preflight_summary,
     start_publish_job,
     trigger_platform_login,
 )
@@ -110,8 +112,11 @@ async def api_update_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/accounts")
-async def api_accounts(deep: bool = Query(default=False)) -> dict[str, Any]:
-    statuses = await get_all_accounts_status(deep_verify=deep)
+async def api_accounts(
+    deep: bool = Query(default=False),
+    auto_sync: bool = Query(default=True),
+) -> dict[str, Any]:
+    statuses = await get_all_accounts_status(deep_verify=deep, auto_sync=auto_sync)
     return {"accounts": statuses}
 
 
@@ -429,6 +434,20 @@ async def api_generate_copy(req: GenerateCopyRequest) -> dict[str, Any]:
     return {"copy": copy_data}
 
 
+@app.post("/api/preflight")
+async def api_preflight(req: PublishRequest) -> dict[str, Any]:
+    if not req.platforms:
+        raise HTTPException(status_code=400, detail="Select at least one target platform.")
+    return await run_preflight_summary(
+        video_path=req.video_path,
+        poster_path=req.poster_path,
+        covers=req.covers,
+        platforms=req.platforms,
+        copy_payload=req.copy_payload,
+        options=req.options,
+    )
+
+
 @app.post("/api/publish")
 async def api_publish(req: PublishRequest) -> dict[str, Any]:
     if not req.platforms:
@@ -459,6 +478,15 @@ async def api_get_job(job_id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job": job}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def api_cancel_job(job_id: str) -> dict[str, Any]:
+    try:
+        job = await cancel_job(job_id)
+        return {"job": job}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/media")

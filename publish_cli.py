@@ -22,6 +22,7 @@ from app.asset_scanner import scan_bundle_directory
 from app.config import load_settings
 from app.publisher import (
     ACTIVE_JOBS,
+    cancel_job,
     get_all_accounts_status,
     start_publish_job,
     trigger_platform_login,
@@ -94,16 +95,27 @@ async def async_main() -> int:
     )
 
     seen_logs = 0
-    while True:
-        live = ACTIVE_JOBS.get(job.job_id)
-        if not live:
-            break
-        while seen_logs < len(live.logs):
-            print("  " + live.logs[seen_logs])
-            seen_logs += 1
-        if live.status != "running":
-            break
-        await asyncio.sleep(0.5)
+    try:
+        while True:
+            live = ACTIVE_JOBS.get(job.job_id)
+            if not live:
+                break
+            while seen_logs < len(live.logs):
+                print("  " + live.logs[seen_logs])
+                seen_logs += 1
+            if live.status != "running":
+                break
+            await asyncio.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n[!] Cancelling active publish job...")
+        await cancel_job(job.job_id)
+        return 130
+
+    if args.dry_run and job.issues:
+        print("\nPreflight Issues Summary:")
+        for plat, items in job.issues.items():
+            for msg in items:
+                print(f"  - [{plat}] {msg}")
 
     return 0 if job.status == "completed" else 1
 

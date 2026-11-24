@@ -16,15 +16,18 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.asset_scanner import probe_video_metadata
 from app.chrome_bridge import CDP_URL, is_studio_chrome_running, sync_login_from_studio_chrome
 from app.config import JOBS_FILE, VENDOR_SAU_DIR, load_settings
 from app.multipost_bridge import publish_via_multipost
 from app.x_uploader import check_x_cookie_fast, get_x_cookie_file, login_x_browser, upload_x_video
 
 SAU_CLI_SCRIPT = VENDOR_SAU_DIR / "sau_cli.py"
+MAX_ACTIVE_JOBS = 25
 
 SAU_PLATFORM_MAP = {
     "douyin": "douyin",
@@ -48,9 +51,13 @@ class PublishJob:
     poster_path: str | None
     platforms: list[str]
     dry_run: bool = False
-    status: str = "running"  # running | completed | partial_failed | failed
+    status: str = "running"  # running | completed | partial_failed | failed | cancelled
+    cancelled: bool = False
     platform_states: dict[str, dict[str, Any]] = field(default_factory=dict)
+    issues: dict[str, list[str]] = field(default_factory=dict)
     logs: list[str] = field(default_factory=list)
+    _active_proc: asyncio.subprocess.Process | None = field(default=None, repr=False, compare=False)
+    _task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
     def log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -58,6 +65,12 @@ class PublishJob:
         self.logs.append(entry)
 
     def to_dict(self) -> dict[str, Any]:
+        total = max(len(self.platforms), 1)
+        done = sum(
+            1
+            for p in self.platforms
+            if (self.platform_states.get(p) or {}).get("status") not in (None, "queued", "running")
+        )
         return {
             "job_id": self.job_id,
             "created_at": self.created_at,
@@ -66,12 +79,30 @@ class PublishJob:
             "platforms": self.platforms,
             "dry_run": self.dry_run,
             "status": self.status,
+            "cancelled": self.cancelled,
+            "progress": {
+                "completed": done,
+                "total": len(self.platforms),
+                "percent": round((done / total) * 100),
+            },
             "platform_states": self.platform_states,
+            "issues": self.issues,
             "logs": self.logs[-300:],
         }
 
 
 ACTIVE_JOBS: dict[str, PublishJob] = {}
+
+
+def _evict_stale_jobs() -> None:
+    if len(ACTIVE_JOBS) <= MAX_ACTIVE_JOBS:
+        return
+    finished = sorted(
+        (j for j in ACTIVE_JOBS.values() if j.status != "running"),
+        key=lambda item: item.created_at,
+    )
+    for j in finished[: max(0, len(ACTIVE_JOBS) - MAX_ACTIVE_JOBS)]:
+        ACTIVE_JOBS.pop(j.job_id, None)
 
 
 def _save_job_history(job: PublishJob) -> None:
@@ -114,14 +145,19 @@ def _sau_cookie_path(sau_platform: str, account_name: str) -> Path:
     return cookies_dir / f"{sau_platform}_{account_name}.json"
 
 
-async def get_all_accounts_status(deep_verify: bool = False) -> dict[str, Any]:
+def _has_running_job() -> bool:
+    return any(j.status == "running" for j in ACTIVE_JOBS.values())
+
+
+async def get_all_accounts_status(deep_verify: bool = False, auto_sync: bool = True) -> dict[str, Any]:
     """Return instant status of Douyin, Shipinhao, Weibo, and X accounts (auto-syncing if Studio Chrome is open)."""
-    chrome_live = await is_studio_chrome_running()
-    if chrome_live["running"]:
-        try:
-            await sync_login_from_studio_chrome()
-        except Exception:
-            pass
+    if auto_sync and not _has_running_job():
+        chrome_live = await is_studio_chrome_running()
+        if chrome_live["running"]:
+            try:
+                await sync_login_from_studio_chrome()
+            except Exception:
+                pass
 
     settings = load_settings()
     accounts = settings.get("accounts") or {}
@@ -161,7 +197,7 @@ async def get_all_accounts_status(deep_verify: bool = False) -> dict[str, Any]:
         "mode": x_stat["mode"],
         "route": (
             f"Proxy ({net.get('x_proxy_url')})"
-            if net.get("x_use_proxy", True) and net.get("x_proxy_url")
+            if net.get("x_use_proxy", False) and net.get("x_proxy_url")
             else "Direct Network"
         ),
         "detail": x_stat["detail"],
@@ -227,6 +263,7 @@ async def _run_sau_subprocess(
     log_fn=None,
     timeout_sec: int = 600,
     cdp_url: str = "",
+    job: PublishJob | None = None,
 ) -> tuple[int, str]:
     cmd = [sys.executable, str(SAU_CLI_SCRIPT), *cli_args]
     env = _build_clean_cn_env(settings, cdp_url=cdp_url)
@@ -238,6 +275,8 @@ async def _run_sau_subprocess(
         stderr=asyncio.subprocess.STDOUT,
         env=env,
     )
+    if job is not None:
+        job._active_proc = proc
     collected: list[str] = []
     assert proc.stdout is not None
 
@@ -257,6 +296,9 @@ async def _run_sau_subprocess(
     except TimeoutError:
         proc.kill()
         raise RuntimeError(f"Command timed out after {timeout_sec}s: {' '.join(cli_args[:3])}")
+    finally:
+        if job is not None and job._active_proc is proc:
+            job._active_proc = None
 
 
 def build_sau_upload_args(
@@ -321,6 +363,176 @@ def build_sau_upload_args(
     return args
 
 
+async def validate_platform_preflight(
+    plat: str,
+    vpath: Path,
+    covers: dict[str, str | None],
+    copy_payload: dict[str, Any],
+    options: dict[str, Any],
+    settings: dict[str, Any],
+    active_cdp: str = "",
+    video_meta: dict[str, Any] | None = None,
+) -> tuple[bool, list[str], list[str], list[str]]:
+    """Run real platform preflight checks returning `(ok, warnings, errors, notes)`."""
+    warnings: list[str] = []
+    errors: list[str] = []
+    notes: list[str] = []
+
+    if not vpath.is_file():
+        errors.append(f"Video file not found: {vpath}")
+        return (False, warnings, errors, notes)
+
+    accounts = settings.get("accounts") or {}
+    schedule_str = (options.get("schedule") or "").strip()
+
+    if plat in ("douyin", "shipinhao") and schedule_str:
+        try:
+            sched_dt = datetime.strptime(schedule_str, "%Y-%m-%d %H:%M")
+            if sched_dt <= datetime.now() + timedelta(minutes=10):
+                errors.append("Schedule time must be at least 10 minutes in the future.")
+            else:
+                notes.append(f"Scheduled for {schedule_str}")
+        except ValueError:
+            errors.append(f"Invalid schedule '{schedule_str}'. Expected format: YYYY-MM-DD HH:MM.")
+
+    if plat in SAU_PLATFORM_MAP:
+        acc = accounts.get(plat, "creator")
+        cookie_file = _sau_cookie_path(SAU_PLATFORM_MAP[plat], acc)
+        cookie_ready = cookie_file.is_file() and cookie_file.stat().st_size > 20
+        if not cookie_ready:
+            if active_cdp:
+                errors.append(f"Account '{acc}' cookie not synced yet — log in inside Real Chrome and click Sync.")
+            else:
+                errors.append(f"Account '{acc}' not connected — click Open Real Chrome or paste cookies.")
+        else:
+            notes.append(f"Account '{acc}': Cookie READY ({cookie_file.name})")
+        notes.append("Route: Direct CN IP (Proxy stripped)")
+
+        meta = copy_payload.get(plat) or {}
+        title = (meta.get("title") or "").strip()
+        if not title:
+            warnings.append("Title is empty — video filename will be used as fallback.")
+        elif len(title) > 30:
+            warnings.append(f"Title is {len(title)} chars (platform caps at 30; will be truncated).")
+
+        if plat == "shipinhao":
+            short_title = (meta.get("short_title") or "").strip()
+            if len(short_title) < 6 or len(short_title) > 16:
+                errors.append(f"Shipinhao short_title must be 6–16 characters (currently {len(short_title)}).")
+
+        if plat == "weibo":
+            weibo_cov = covers.get("weibo_cover") or covers.get("original")
+            if not weibo_cov or not Path(weibo_cov).is_file():
+                errors.append("Weibo requires a cover image (poster card missing).")
+            else:
+                cov_size = Path(weibo_cov).stat().st_size
+                if cov_size > 5 * 1024 * 1024:
+                    errors.append(f"Weibo cover is {cov_size / (1024 * 1024):.1f} MB (must be < 5 MB).")
+                else:
+                    notes.append(f"Cover: {Path(weibo_cov).name} ({cov_size / 1024:.0f} KB)")
+
+        return (len(errors) == 0, warnings, errors, notes)
+
+    if plat == "x":
+        acc = accounts.get("x", "creator")
+        x_cfg = settings.get("x_config") or {}
+        is_premium = bool(x_cfg.get("is_premium", True))
+        use_long = is_premium and bool(options.get("x_use_long_note"))
+        x_meta = copy_payload.get("x") or {}
+        post_text = (
+            (x_meta.get("long_note") if use_long else x_meta.get("text"))
+            or x_meta.get("text")
+            or ""
+        ).strip()
+        x_stat = await check_x_cookie_fast(acc, settings)
+        net = settings.get("network") or {}
+        route = net.get("x_proxy_url") if net.get("x_use_proxy") else "Direct"
+
+        if not x_stat["ready"] and not active_cdp:
+            errors.append(f"X not connected ({x_stat['detail']}).")
+        elif not x_stat["ready"] and active_cdp:
+            errors.append("Studio Chrome is open, but X login cookies have not been synced yet.")
+        else:
+            notes.append(f"Mode: {x_stat['mode']} | Route: {route} | {x_stat['detail']}")
+
+        if not post_text:
+            errors.append("X post copy cannot be empty.")
+        elif not use_long and len(post_text) > 280:
+            errors.append(f"X post is {len(post_text)} chars (Standard limit is 280; enable X Premium Long Post or shorten).")
+        elif use_long and len(post_text) > 4000:
+            errors.append(f"X long post is {len(post_text)} chars (max 4000).")
+        else:
+            notes.append(f"Post length: {len(post_text)} chars")
+
+        vmeta = video_meta or probe_video_metadata(vpath)
+        if not is_premium:
+            if vmeta.get("duration_sec", 0.0) > 140.0:
+                errors.append(
+                    f"Video is {vmeta.get('duration_label')} (>140s): X Standard rejects videos over 2m20s (enable X Premium)."
+                )
+            if vmeta.get("size_mb", 0.0) > 512.0:
+                errors.append(f"Video is {vmeta.get('size_mb')} MB (>512 MB): exceeds X Standard limit.")
+
+        return (len(errors) == 0, warnings, errors, notes)
+
+    errors.append(f"Unknown platform '{plat}'.")
+    return (False, warnings, errors, notes)
+
+
+async def run_preflight_summary(
+    video_path: str,
+    poster_path: str | None,
+    covers: dict[str, str | None],
+    platforms: list[str],
+    copy_payload: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run synchronous fast preflight checks across selected platforms for UI confirmation & API inspection."""
+    options = options or {}
+    vpath = Path(video_path).expanduser().resolve()
+    settings = load_settings()
+    chrome_info = await is_studio_chrome_running()
+    active_cdp = CDP_URL if chrome_info["running"] else ""
+    vmeta = probe_video_metadata(vpath) if vpath.is_file() else None
+
+    results: dict[str, Any] = {}
+    all_ok = True
+    has_warnings = False
+    for plat in platforms:
+        ok, warnings, errors, notes = await validate_platform_preflight(
+            plat=plat,
+            vpath=vpath,
+            covers=covers,
+            copy_payload=copy_payload,
+            options=options,
+            settings=settings,
+            active_cdp=active_cdp,
+            video_meta=vmeta,
+        )
+        if not ok:
+            all_ok = False
+        if warnings:
+            has_warnings = True
+        results[plat] = {
+            "platform": plat,
+            "label": PLATFORM_LABELS.get(plat, plat),
+            "ok": ok,
+            "status": "failed" if errors else ("warning" if warnings else "success"),
+            "errors": errors,
+            "warnings": warnings,
+            "notes": notes,
+            "issues": errors + warnings,
+        }
+
+    return {
+        "ok": all_ok,
+        "has_warnings": has_warnings,
+        "chrome_running": bool(active_cdp),
+        "video": vmeta,
+        "platforms": results,
+    }
+
+
 def start_publish_job(
     video_path: str,
     poster_path: str | None,
@@ -336,6 +548,7 @@ def start_publish_job(
     if not vpath.is_file():
         raise FileNotFoundError(f"Video file not found: {vpath}")
 
+    _evict_stale_jobs()
     job_id = uuid.uuid4().hex[:10]
     job = PublishJob(
         job_id=job_id,
@@ -350,8 +563,52 @@ def start_publish_job(
         },
     )
     ACTIVE_JOBS[job_id] = job
-    asyncio.create_task(_execute_job(job, vpath, covers, copy_payload, options))
+    job._task = asyncio.create_task(_execute_job(job, vpath, covers, copy_payload, options))
     return job
+
+
+async def cancel_job(job_id: str) -> dict[str, Any]:
+    """Cancel a running publish job, terminating any active uploader subprocess cleanly."""
+    job = ACTIVE_JOBS.get(job_id)
+    if job is None:
+        saved = get_job(job_id)
+        if saved is None:
+            raise KeyError(f"Job not found: {job_id}")
+        return saved
+
+    if job.status != "running":
+        return job.to_dict()
+
+    job.cancelled = True
+    job.log("=== Cancellation requested by user ===")
+    proc = job._active_proc
+    if proc is not None and proc.returncode is None:
+        try:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.5)
+            except asyncio.TimeoutError:
+                proc.kill()
+        except ProcessLookupError:
+            pass
+        except Exception as exc:
+            job.log(f"[Cancel] Subprocess termination warning: {exc}")
+
+    for plat in job.platforms:
+        st = (job.platform_states.get(plat) or {}).get("status")
+        if st in ("queued", "running"):
+            job.platform_states[plat] = {
+                "status": "cancelled",
+                "label": PLATFORM_LABELS.get(plat, plat),
+                "message": "Cancelled by user",
+            }
+
+    if job._task and not job._task.done():
+        job._task.cancel()
+
+    job.status = "cancelled"
+    _save_job_history(job)
+    return job.to_dict()
 
 
 async def _execute_job(
@@ -369,140 +626,198 @@ async def _execute_job(
     mode_banner = "DRY-RUN PREFLIGHT" if job.dry_run else "LIVE PUBLISH"
     job.log(f"=== Starting {mode_banner} for {vpath.name} -> {', '.join(job.platforms)} ===")
 
-    chrome_info = await is_studio_chrome_running()
-    active_cdp = CDP_URL if chrome_info["running"] else ""
-    if active_cdp:
-        job.log(f"[Chrome Bridge] Live Studio Chrome detected ({active_cdp})! Syncing sessions & attaching directly...")
-        try:
-            await sync_login_from_studio_chrome()
-        except Exception as exc:
-            job.log(f"[Chrome Bridge] Sync warning: {exc}")
+    try:
+        chrome_info = await is_studio_chrome_running()
+        active_cdp = CDP_URL if chrome_info["running"] else ""
+        if active_cdp:
+            job.log(f"[Chrome Bridge] Live Studio Chrome detected ({active_cdp})! Syncing sessions & attaching directly...")
+            try:
+                await sync_login_from_studio_chrome()
+            except Exception as exc:
+                job.log(f"[Chrome Bridge] Sync warning: {exc}")
 
-    if mp_cfg.get("enabled") and not job.dry_run:
-        try:
-            p_cover = Path(covers["original"]) if covers.get("original") else None
-            await publish_via_multipost(vpath, p_cover, copy_payload, job.platforms, settings, job.log)
-            for p in job.platforms:
-                job.platform_states[p] = {
-                    "status": "success",
-                    "label": PLATFORM_LABELS.get(p, p),
-                    "message": "Dispatched to MultiPost Browser Extension",
+        if mp_cfg.get("enabled") and not job.dry_run:
+            try:
+                p_cover = Path(covers["original"]) if covers.get("original") else None
+                await publish_via_multipost(vpath, p_cover, copy_payload, job.platforms, settings, job.log)
+                for p in job.platforms:
+                    job.platform_states[p] = {
+                        "status": "success",
+                        "label": PLATFORM_LABELS.get(p, p),
+                        "message": "Dispatched to MultiPost Browser Extension",
+                    }
+                job.status = "completed"
+                _save_job_history(job)
+                return
+            except Exception as exc:
+                job.log(f"[MultiPost] Extension unreachable ({exc}); falling back to native uploaders...")
+
+        vmeta = probe_video_metadata(vpath) if vpath.is_file() else None
+        success_count = 0
+
+        for plat in job.platforms:
+            if job.cancelled:
+                job.platform_states[plat] = {
+                    "status": "cancelled",
+                    "label": PLATFORM_LABELS.get(plat, plat),
+                    "message": "Cancelled by user",
                 }
-            job.status = "completed"
-            _save_job_history(job)
-            return
-        except Exception as exc:
-            job.log(f"[MultiPost] Extension unreachable ({exc}); falling back to native uploaders...")
+                continue
 
-    # Execute platforms sequentially for domestic browser safety (prevents simultaneous Chrome CPU spikes),
-    # while streaming crystal-clear per-platform progress!
-    success_count = 0
-    for plat in job.platforms:
-        label = PLATFORM_LABELS.get(plat, plat)
-        job.platform_states[plat]["status"] = "running"
-        job.platform_states[plat]["message"] = "Validating & preparing upload..."
-        job.log(f"--- [{label}] Starting ---")
+            label = PLATFORM_LABELS.get(plat, plat)
+            job.platform_states[plat]["status"] = "running"
+            job.platform_states[plat]["message"] = "Validating & preparing upload..."
+            job.log(f"--- [{label}] Starting ---")
 
-        try:
-            if plat in SAU_PLATFORM_MAP:
-                acc = accounts.get(plat, "creator")
-                meta = copy_payload.get(plat) or {}
-                cli_args = build_sau_upload_args(plat, acc, vpath, covers, meta, options, headless)
-                cookie_file = _sau_cookie_path(SAU_PLATFORM_MAP[plat], acc)
-
+            try:
                 if job.dry_run:
-                    cookie_note = "Cookie READY" if cookie_file.is_file() else "Cookie NOT connected yet"
-                    job.log(f"[{label}] Route: Direct CN IP (Proxy stripped)")
-                    job.log(f"[{label}] Account '{acc}': {cookie_note} ({cookie_file.name})")
-                    job.log(f"[{label}] Command validated: sau {' '.join(cli_args)}")
+                    ok, warnings, errors, notes = await validate_platform_preflight(
+                        plat=plat,
+                        vpath=vpath,
+                        covers=covers,
+                        copy_payload=copy_payload,
+                        options=options,
+                        settings=settings,
+                        active_cdp=active_cdp,
+                        video_meta=vmeta,
+                    )
+                    for n in notes:
+                        job.log(f"[{label}] {n}")
+                    for w in warnings:
+                        job.log(f"[{label}] WARNING: {w}")
+                    for e in errors:
+                        job.log(f"[{label}] ERROR: {e}")
+
+                    if plat in SAU_PLATFORM_MAP:
+                        acc = accounts.get(plat, "creator")
+                        meta = copy_payload.get(plat) or {}
+                        cli_args = build_sau_upload_args(plat, acc, vpath, covers, meta, options, headless)
+                        job.log(f"[{label}] Command validated: sau {' '.join(cli_args)}")
+
+                    issues = errors + warnings
+                    if issues:
+                        job.issues[plat] = issues
+
+                    if errors:
+                        job.platform_states[plat] = {
+                            "status": "failed",
+                            "label": label,
+                            "message": errors[0],
+                            "issues": issues,
+                        }
+                    elif warnings:
+                        job.platform_states[plat] = {
+                            "status": "warning",
+                            "label": label,
+                            "message": warnings[0],
+                            "issues": issues,
+                        }
+                        success_count += 1
+                    else:
+                        job.platform_states[plat] = {
+                            "status": "success",
+                            "label": label,
+                            "message": "Preflight passed",
+                            "issues": [],
+                        }
+                        success_count += 1
+                    continue
+
+                if plat in SAU_PLATFORM_MAP:
+                    acc = accounts.get(plat, "creator")
+                    meta = copy_payload.get(plat) or {}
+                    cli_args = build_sau_upload_args(plat, acc, vpath, covers, meta, options, headless)
+                    cookie_file = _sau_cookie_path(SAU_PLATFORM_MAP[plat], acc)
+
+                    if not cookie_file.is_file():
+                        if active_cdp:
+                            raise RuntimeError(
+                                f"{label} account '{acc}' is not synced yet. Sign in inside Real Chrome and click Sync first."
+                            )
+                        raise RuntimeError(
+                            f"{label} account '{acc}' is not logged in yet. Click 'Open Real Chrome' to log in first."
+                        )
+
+                    job.platform_states[plat]["message"] = (
+                        "Publishing in your live Chrome tab..." if active_cdp else "Uploading via Creator Studio..."
+                    )
+                    code, out = await _run_sau_subprocess(
+                        cli_args,
+                        settings,
+                        log_fn=lambda ln, lb=label: job.log(f"[{lb}] {ln}"),
+                        cdp_url=active_cdp,
+                        job=job,
+                    )
+                    if job.cancelled:
+                        job.platform_states[plat] = {
+                            "status": "cancelled",
+                            "label": label,
+                            "message": "Cancelled by user",
+                        }
+                        continue
+                    if code != 0:
+                        raise RuntimeError(f"Uploader exited with code {code}. Tail: {out[-300:]}")
+
                     job.platform_states[plat] = {
                         "status": "success",
                         "label": label,
-                        "message": f"Preflight passed ({cookie_note})",
+                        "message": "Published successfully!",
                     }
+                    job.log(f"[{label}] Completed successfully!")
                     success_count += 1
-                    continue
 
-                if not cookie_file.is_file() and not active_cdp:
-                    raise RuntimeError(
-                        f"{label} account '{acc}' is not logged in yet. Click 'Open Real Chrome' to log in first."
-                    )
+                elif plat == "x":
+                    acc = accounts.get("x", "creator")
+                    x_meta = copy_payload.get("x") or {}
+                    use_long = bool((settings.get("x_config") or {}).get("is_premium")) and bool(options.get("x_use_long_note"))
+                    post_text = (x_meta.get("long_note") if use_long else x_meta.get("text")) or x_meta.get("text") or vpath.stem
 
-                job.platform_states[plat]["message"] = (
-                    "Publishing in your live Chrome tab..." if active_cdp else "Uploading via Creator Studio..."
-                )
-                code, out = await _run_sau_subprocess(
-                    cli_args,
-                    settings,
-                    log_fn=lambda ln, lb=label: job.log(f"[{lb}] {ln}"),
-                    cdp_url=active_cdp,
-                )
-                if code != 0:
-                    raise RuntimeError(f"Uploader exited with code {code}. Tail: {out[-300:]}")
-
-                job.platform_states[plat] = {
-                    "status": "success",
-                    "label": label,
-                    "message": "Published successfully!",
-                }
-                job.log(f"[{label}] Completed successfully!")
-                success_count += 1
-
-            elif plat == "x":
-                acc = accounts.get("x", "creator")
-                x_meta = copy_payload.get("x") or {}
-                use_long = bool((settings.get("x_config") or {}).get("is_premium")) and bool(options.get("x_use_long_note"))
-                post_text = (x_meta.get("long_note") if use_long else x_meta.get("text")) or x_meta.get("text") or vpath.stem
-                x_stat = await check_x_cookie_fast(acc, settings)
-
-                if job.dry_run:
-                    net = settings.get("network") or {}
-                    route = net.get("x_proxy_url") if net.get("x_use_proxy") else "Direct"
-                    job.log(f"[X] Mode: {x_stat['mode']} | Route: {route} | Auth: {x_stat['detail']}")
-                    job.log(f"[X] Post length: {len(post_text)} chars | Video: {vpath.name}")
+                    job.platform_states["x"]["message"] = "Uploading video to X..."
+                    res = await upload_x_video(vpath, post_text, acc, settings, job.log, cdp_url=active_cdp)
+                    msg = f"Published ({res.get('post_url')})" if res.get("post_url") else "Published to X!"
                     job.platform_states["x"] = {
                         "status": "success",
                         "label": label,
-                        "message": f"Preflight passed ({x_stat['detail']})",
+                        "message": msg,
                     }
                     success_count += 1
-                    continue
+                else:
+                    raise ValueError(f"Unknown platform '{plat}'")
 
-                job.platform_states["x"]["message"] = "Uploading video to X..."
-                prev_cdp = os.environ.get("SAU_CDP_URL")
-                try:
-                    if active_cdp:
-                        os.environ["SAU_CDP_URL"] = active_cdp
-                    res = await upload_x_video(vpath, post_text, acc, settings, job.log)
-                finally:
-                    if prev_cdp is None:
-                        os.environ.pop("SAU_CDP_URL", None)
-                    else:
-                        os.environ["SAU_CDP_URL"] = prev_cdp
-                msg = f"Published ({res.get('post_url')})" if res.get("post_url") else "Published to X!"
-                job.platform_states["x"] = {
-                    "status": "success",
+            except asyncio.CancelledError:
+                job.platform_states[plat] = {
+                    "status": "cancelled",
                     "label": label,
-                    "message": msg,
+                    "message": "Cancelled by user",
                 }
-                success_count += 1
-            else:
-                raise ValueError(f"Unknown platform '{plat}'")
+                raise
+            except Exception as exc:
+                job.log(f"[{label}] ERROR: {exc}")
+                job.platform_states[plat] = {
+                    "status": "failed",
+                    "label": label,
+                    "message": str(exc),
+                }
 
-        except Exception as exc:
-            job.log(f"[{label}] ERROR: {exc}")
-            job.platform_states[plat] = {
-                "status": "failed",
-                "label": label,
-                "message": str(exc),
-            }
+        if job.cancelled:
+            job.status = "cancelled"
+        elif success_count == len(job.platforms):
+            job.status = "completed"
+        elif success_count > 0:
+            job.status = "partial_failed"
+        else:
+            job.status = "failed"
 
-    if success_count == len(job.platforms):
-        job.status = "completed"
-    elif success_count > 0:
-        job.status = "partial_failed"
-    else:
-        job.status = "failed"
-
-    job.log(f"=== Job finished with status: {job.status.upper()} ({success_count}/{len(job.platforms)} succeeded) ===")
-    _save_job_history(job)
+        job.log(f"=== Job finished with status: {job.status.upper()} ({success_count}/{len(job.platforms)} succeeded) ===")
+        _save_job_history(job)
+    except asyncio.CancelledError:
+        job.cancelled = True
+        job.status = "cancelled"
+        for p in job.platforms:
+            if (job.platform_states.get(p) or {}).get("status") in ("queued", "running"):
+                job.platform_states[p] = {
+                    "status": "cancelled",
+                    "label": PLATFORM_LABELS.get(p, p),
+                    "message": "Cancelled by user",
+                }
+        _save_job_history(job)
