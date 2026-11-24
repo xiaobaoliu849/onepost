@@ -57,16 +57,16 @@
 - [x] Upgrade Poster Lightbox with active ratio label and Prev/Next + Arrow-key navigation
 - [x] Verify JS syntax & `pytest` suite
 
-### [/] Milestone 4: Composer Interactions, Connect Modal Fix, Settings & Publish Command Dock
-- [ ] Fix Connect Modal Tab 2 with 4-platform pill selector + Deep Verify button
-- [ ] Add per-card Copy button, live Job Status badge, non-destructive `btnGenerateCopy` loading state, and dual short/long X draft memory (`state.xDrafts`)
-- [ ] Preserve `multipost.api_key` in Settings, add `default_watch_dir` + CN/EN brand signatures + **Test AI Connection** button
-- [ ] Replace unsafe silent demo auto-publish with Pre-Publish Confirmation Modal backed by `/api/preflight`
-- [ ] Upgrade Publish Dock with top progress bar, dynamic status indicator, **Cancel Job**, **Retry Failed**, `datetime-local` schedule picker + validation, and tabbed Activity Drawer (**Live Log** + **Recent Jobs** history)
-- [ ] Add `Escape` modal dismissal, theme icon toggle (`moon`/`sun`), responsive navbar wrapping, and `:focus-visible` styles
-- [ ] Verify JS syntax & `pytest` suite
+### [x] Milestone 4: Composer Interactions, Connect Modal Fix, Settings & Publish Command Dock
+- [x] Fix Connect Modal Tab 2 with 4-platform pill selector + Deep Verify button
+- [x] Add per-card Copy button, live Job Status badge, non-destructive `btnGenerateCopy` loading state, and dual short/long X draft memory (`state.xDrafts`)
+- [x] Preserve `multipost.api_key` in Settings, add `default_watch_dir` + CN/EN brand signatures + **Test AI Connection** button
+- [x] Replace unsafe silent demo auto-publish with Pre-Publish Confirmation Modal backed by `/api/preflight`
+- [x] Upgrade Publish Dock with top progress bar, dynamic status indicator, **Cancel Job**, **Retry Failed**, `datetime-local` schedule picker + validation, and tabbed Activity Drawer (**Live Log** + **Recent Jobs** history)
+- [x] Add `Escape` modal dismissal, theme icon toggle (`moon`/`sun`), responsive navbar wrapping, and `:focus-visible` styles
+- [x] Verify JS syntax & `pytest` suite
 
-### [ ] Milestone 5: End-to-End Verification Suite, Documentation & Final Polish
+### [/] Milestone 5: End-to-End Verification Suite, Documentation & Final Polish
 - [ ] Add `tests/test_ui_and_api_e2e.py` verifying DOM ID integrity (`static/app.js` vs `static/index.html`) and isolated end-to-end API flows
 - [ ] Update `README.md` with new studio features & test command
 - [ ] Finalize `docs/IMPROVEMENT_ROADMAP.md` with Phase 2 Next-Step evolution plan

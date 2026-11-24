@@ -15,6 +15,11 @@ const state = {
   pollTimer: null,
   activeUploadXhr: null,
   lightboxIdx: 0,
+  pastePlatform: "douyin",
+  xDrafts: { short: "", long: "" },
+  lastFailedPlatforms: [],
+  pendingPublishBody: null,
+  activeDrawerTab: "live",
 };
 
 const POSTER_VARIANTS = [
@@ -49,9 +54,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   await Promise.all([fetchSettings(), fetchAccounts(false), checkChromeBridgeStatus()]);
 });
 
+function applyThemeIcon(theme) {
+  const isDark = theme === "dark";
+  $("iconMoon")?.classList.toggle("hidden", isDark);
+  $("iconSun")?.classList.toggle("hidden", !isDark);
+}
+
 function initTheme() {
   const saved = localStorage.getItem("OnePost_theme") || "light";
   document.documentElement.setAttribute("data-theme", saved);
+  applyThemeIcon(saved);
 }
 
 function bindEvents() {
@@ -60,10 +72,28 @@ function bindEvents() {
     const next = cur === "light" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem("OnePost_theme", next);
+    applyThemeIcon(next);
   });
 
   $("btnLoadDemo").addEventListener("click", loadDemoBundle);
-  $("btnRefreshAccounts").addEventListener("click", () => fetchAccounts(false));
+  $("btnRefreshAccounts").addEventListener("click", async () => {
+    await fetchAccounts(false);
+    showToast("Channel status synced.", "info", 2200);
+  });
+  $("btnDeepVerifyAccounts").addEventListener("click", async () => {
+    const btn = $("btnDeepVerifyAccounts");
+    btn.disabled = true;
+    btn.querySelector("span").textContent = "Verifying...";
+    try {
+      await fetchAccounts(true);
+      showToast("Live cookie verification completed.", "success");
+    } catch (err) {
+      showToast(`Verify failed: ${err.message}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.querySelector("span").textContent = "Verify Cookies";
+    }
+  });
   $("btnScanFolder").addEventListener("click", () => scanFolder());
   $("inputFolderPath").addEventListener("keydown", (e) => {
     if (e.key === "Enter") scanFolder();
@@ -184,6 +214,13 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      $("posterLightbox").classList.add("hidden");
+      closeConnectModal();
+      $("settingsModal").classList.add("hidden");
+      $("confirmPublishModal").classList.add("hidden");
+      return;
+    }
     if (!$("posterLightbox").classList.contains("hidden")) {
       if (e.key === "ArrowLeft") openLightboxByIndex((state.lightboxIdx + POSTER_VARIANTS.length - 1) % POSTER_VARIANTS.length);
       if (e.key === "ArrowRight") openLightboxByIndex((state.lightboxIdx + 1) % POSTER_VARIANTS.length);
@@ -202,13 +239,16 @@ function bindEvents() {
     });
   });
 
-  // Platform switches
+  // Platform switches & copy-to-clipboard buttons
   ["douyin", "shipinhao", "weibo", "x"].forEach((plat) => {
     $(`chk_${plat}`).addEventListener("change", (e) => {
       const card = document.querySelector(`.p-card[data-plat="${plat}"]`);
       card.classList.toggle("disabled-card", !e.target.checked);
       updateSelectedButtonCount();
     });
+  });
+  document.querySelectorAll(".btn-copy-card").forEach((btn) => {
+    btn.addEventListener("click", () => copyPlatformCardText(btn.dataset.copyPlat));
   });
 
   // Character counters & X SVG progress ring
@@ -218,32 +258,91 @@ function bindEvents() {
   bindCounter("wb_title", "cnt_wb_title", 30);
   bindXRing("x_text", "cnt_x_text", "xRingCircle");
 
+  $("x_text").addEventListener("input", () => {
+    const key = $("opt_x_long").checked ? "long" : "short";
+    state.xDrafts[key] = $("x_text").value;
+  });
   $("opt_x_long").addEventListener("change", (e) => {
-    if (state.copy?.x) {
-      $("x_text").value = e.target.checked
-        ? state.copy.x.long_note || state.copy.x.text
-        : state.copy.x.text;
-    }
+    const key = e.target.checked ? "long" : "short";
+    $("x_text").value = state.xDrafts[key] ?? (e.target.checked ? state.copy?.x?.long_note || state.copy?.x?.text || "" : state.copy?.x?.text || "");
     $("x_text").dispatchEvent(new Event("input"));
   });
 
-  // Publish & Activity Drawer
+  // Schedule picker + live validation
+  $("btnPickSchedule").addEventListener("click", () => {
+    const picker = $("optSchedulePicker");
+    if (picker.showPicker) picker.showPicker();
+    else picker.click();
+  });
+  $("optSchedulePicker").addEventListener("change", () => {
+    const raw = $("optSchedulePicker").value; // YYYY-MM-DDTHH:MM
+    if (raw) {
+      $("optSchedule").value = raw.replace("T", " ");
+      validateScheduleInput();
+    }
+  });
+  $("optSchedule").addEventListener("input", validateScheduleInput);
+  $("btnClearSchedule").addEventListener("click", () => {
+    $("optSchedule").value = "";
+    $("optSchedulePicker").value = "";
+    validateScheduleInput();
+  });
+
+  // Publish, Cancel, Retry & Activity Drawer
   $("btnDryRun").addEventListener("click", () => submitPublish(true));
   $("btnPublishAll").addEventListener("click", () => submitPublish(false));
+  $("btnCancelJob").addEventListener("click", cancelActiveJob);
+  $("btnRetryFailed").addEventListener("click", retryFailedPlatforms);
   $("btnToggleDrawer").addEventListener("click", () => {
-    $("activityDrawer").classList.toggle("hidden");
+    const drawer = $("activityDrawer");
+    drawer.classList.toggle("hidden");
+    if (!drawer.classList.contains("hidden") && state.activeDrawerTab === "history") {
+      fetchJobHistory();
+    }
   });
   $("btnCloseDrawer").addEventListener("click", () => {
     $("activityDrawer").classList.add("hidden");
   });
+  $("tabBtnLiveLog").addEventListener("click", () => switchDrawerTab("live"));
+  $("tabBtnRecentJobs").addEventListener("click", () => switchDrawerTab("history"));
+  $("btnCopyLogs").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("jobLogs").textContent || "");
+      showToast("Logs copied to clipboard.", "success", 2000);
+    } catch (_) {
+      showToast("Clipboard permission unavailable.", "warning");
+    }
+  });
+  $("btnClearLogs").addEventListener("click", () => {
+    $("jobLogs").textContent = "Ready. Load a bundle and run Preflight Check or Publish Selected.";
+  });
 
-  // Settings modal
-  $("btnOpenSettings").addEventListener("click", () => $("settingsModal").classList.remove("hidden"));
+  // Pre-Publish Confirmation Modal
+  $("btnCloseConfirmPublish").addEventListener("click", () => $("confirmPublishModal").classList.add("hidden"));
+  $("btnCancelConfirmPublish").addEventListener("click", () => $("confirmPublishModal").classList.add("hidden"));
+  $("confirmPublishModal").addEventListener("click", (e) => {
+    if (e.target === $("confirmPublishModal")) $("confirmPublishModal").classList.add("hidden");
+  });
+  $("btnProceedConfirmPublish").addEventListener("click", async () => {
+    $("confirmPublishModal").classList.add("hidden");
+    if (state.pendingPublishBody) {
+      const body = state.pendingPublishBody;
+      state.pendingPublishBody = null;
+      await dispatchPublishRequest(body);
+    }
+  });
+
+  // Settings modal + AI connection test
+  $("btnOpenSettings").addEventListener("click", () => {
+    $("aiTestResult").textContent = "";
+    $("settingsModal").classList.remove("hidden");
+  });
   $("btnCloseSettings").addEventListener("click", () => $("settingsModal").classList.add("hidden"));
   $("settingsModal").addEventListener("click", (e) => {
     if (e.target === $("settingsModal")) $("settingsModal").classList.add("hidden");
   });
   $("cfg_x_mode").addEventListener("change", toggleXApiFields);
+  $("btnTestAi").addEventListener("click", testAiConnection);
   $("btnSaveSettings").addEventListener("click", saveSettings);
 
   // Real Chrome Bridge & Cookie Paste Modal
@@ -254,6 +353,9 @@ function bindEvents() {
   });
   document.querySelectorAll(".c-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchConnectTab(tab.dataset.ctab));
+  });
+  document.querySelectorAll(".paste-plat-pill").forEach((pill) => {
+    pill.addEventListener("click", () => selectPastePlatform(pill.dataset.pplat));
   });
   $("btnModalOpenChrome").addEventListener("click", () => openRealChrome(state.connectingPlatform));
   $("btnModalSyncChrome").addEventListener("click", syncFromRealChrome);
@@ -368,12 +470,14 @@ async function fetchSettings() {
   state.settings = cfg;
 
   $("cfg_cn_direct").checked = Boolean(cfg.network?.cn_direct_bypass_proxy ?? true);
-  $("cfg_x_use_proxy").checked = Boolean(cfg.network?.x_use_proxy ?? true);
+  $("cfg_x_use_proxy").checked = Boolean(cfg.network?.x_use_proxy ?? false);
   $("cfg_x_proxy").value = cfg.network?.x_proxy_url || "";
 
   $("cfg_ai_base").value = cfg.ai?.base_url || "";
   $("cfg_ai_model").value = cfg.ai?.model || "";
   $("cfg_ai_key").value = cfg.ai?.api_key || "";
+  $("cfg_sig_cn").value = cfg.ai?.brand_signature_cn || "";
+  $("cfg_sig_en").value = cfg.ai?.brand_signature_en || "";
 
   $("cfg_x_mode").value = cfg.x_config?.mode || "browser";
   $("cfg_x_premium").checked = Boolean(cfg.x_config?.is_premium ?? true);
@@ -383,9 +487,14 @@ async function fetchSettings() {
   $("cfg_x_tokensecret").value = cfg.x_config?.access_token_secret || "";
   toggleXApiFields();
 
+  $("cfg_default_dir").value = cfg.default_watch_dir || "";
+  if (cfg.default_watch_dir && !$("inputFolderPath").value.trim()) {
+    $("inputFolderPath").value = cfg.default_watch_dir;
+  }
   $("cfg_chrome_path").value = cfg.chrome_path || "";
   $("cfg_mp_enabled").checked = Boolean(cfg.multipost?.enabled);
   $("cfg_mp_url").value = cfg.multipost?.api_url || "http://127.0.0.1:10721/api/post";
+  $("cfg_mp_apikey").value = cfg.multipost?.api_key || "";
   $("optVisibleBrowser").checked = !Boolean(cfg.headless_upload);
 
   $("xRouteBadge").textContent =
@@ -402,10 +511,40 @@ function toggleXApiFields() {
   $("xApiKeysGroup").classList.toggle("hidden", !isApi);
 }
 
+async function testAiConnection() {
+  const btn = $("btnTestAi");
+  const out = $("aiTestResult");
+  btn.disabled = true;
+  btn.textContent = "Testing...";
+  out.textContent = "Checking endpoint...";
+  out.className = "ai-test-result";
+  try {
+    const res = await fetch("/api/ai/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        base_url: $("cfg_ai_base").value.trim(),
+        model: $("cfg_ai_model").value.trim(),
+        api_key: $("cfg_ai_key").value.trim(),
+      }),
+    });
+    const data = await res.json();
+    out.textContent = data.message || (data.ok ? "Connected!" : "Failed");
+    out.className = `ai-test-result ${data.ok ? "ok" : "err"}`;
+  } catch (err) {
+    out.textContent = `Test failed: ${err.message}`;
+    out.className = "ai-test-result err";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Test AI";
+  }
+}
+
 async function saveSettings() {
   const payload = {
     ...state.settings,
     chrome_path: $("cfg_chrome_path").value.trim(),
+    default_watch_dir: $("cfg_default_dir").value.trim(),
     headless_upload: !$("optVisibleBrowser").checked,
     network: {
       cn_direct_bypass_proxy: $("cfg_cn_direct").checked,
@@ -417,6 +556,8 @@ async function saveSettings() {
       base_url: $("cfg_ai_base").value.trim(),
       model: $("cfg_ai_model").value.trim(),
       api_key: $("cfg_ai_key").value.trim(),
+      brand_signature_cn: $("cfg_sig_cn").value.trim(),
+      brand_signature_en: $("cfg_sig_en").value.trim(),
     },
     x_config: {
       ...(state.settings?.x_config || {}),
@@ -428,18 +569,26 @@ async function saveSettings() {
       access_token_secret: $("cfg_x_tokensecret").value.trim(),
     },
     multipost: {
+      ...(state.settings?.multipost || {}),
       enabled: $("cfg_mp_enabled").checked,
       api_url: $("cfg_mp_url").value.trim(),
+      api_key: $("cfg_mp_apikey").value.trim(),
     },
   };
 
-  await fetch("/api/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  $("settingsModal").classList.add("hidden");
-  await Promise.all([fetchSettings(), fetchAccounts(false)]);
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to save settings");
+    $("settingsModal").classList.add("hidden");
+    await Promise.all([fetchSettings(), fetchAccounts(false)]);
+    showToast("Studio preferences saved!", "success");
+  } catch (err) {
+    showToast(`Save failed: ${err.message}`, "error");
+  }
 }
 
 async function fetchAccounts(deep = false) {
@@ -496,6 +645,15 @@ function switchConnectTab(tabName) {
   $("tabCookiePaste").classList.toggle("hidden", tabName !== "paste");
 }
 
+function selectPastePlatform(plat) {
+  state.pastePlatform = plat || "douyin";
+  document.querySelectorAll(".paste-plat-pill").forEach((pill) => {
+    pill.classList.toggle("active", pill.dataset.pplat === state.pastePlatform);
+  });
+  $("xSpecificFields").classList.toggle("hidden", state.pastePlatform !== "x");
+  $("btnImportRawCookies").textContent = `Import & Connect (${state.pastePlatform})`;
+}
+
 async function connectAccount(platform) {
   state.connectingPlatform = platform === "all" ? null : platform;
   const labels = {
@@ -505,7 +663,7 @@ async function connectAccount(platform) {
     x: "Connect X (Twitter)",
   };
   $("connectModalTitle").textContent = labels[platform] || "Connect Real Chrome Login Status";
-  $("xSpecificFields").classList.toggle("hidden", platform !== "x");
+  selectPastePlatform(platform === "all" ? (state.pastePlatform || "douyin") : platform);
   $("pasteCookieMsg").textContent = "";
   $("inputRawCookies").value = "";
   switchConnectTab("chrome");
@@ -567,7 +725,7 @@ async function syncFromRealChrome() {
 }
 
 async function importRawCookies() {
-  const plat = state.connectingPlatform || "douyin";
+  const plat = state.pastePlatform || state.connectingPlatform || "douyin";
   const raw = $("inputRawCookies").value.trim();
   if (!raw) {
     $("pasteCookieMsg").textContent = "Please paste Cookie JSON or Copy-as-cURL first.";
@@ -1013,9 +1171,12 @@ async function regenerateCopy() {
     return;
   }
   const btn = $("btnGenerateCopy");
-  const prevText = btn.textContent;
+  const span = btn.querySelector("span") || btn;
+  const prevText = span.textContent;
+  const grid = document.querySelector(".platform-cards-grid");
   btn.disabled = true;
-  btn.textContent = "Writing...";
+  span.textContent = "Writing...";
+  grid?.classList.add("is-generating");
   try {
     const res = await fetch("/api/copy/generate", {
       method: "POST",
@@ -1029,11 +1190,14 @@ async function regenerateCopy() {
     if (!res.ok) throw new Error(data.detail || "Copy generation failed");
     state.copy = data.copy;
     populateCopyEditors(data.copy);
+    showToast("Generated tailored copy for all 4 platforms!", "success", 2400);
   } catch (err) {
     appendLog(`Copy error: ${err.message}`);
+    showToast(`Copy generation failed: ${err.message}`, "error");
   } finally {
     btn.disabled = false;
-    btn.textContent = prevText;
+    span.textContent = prevText;
+    grid?.classList.remove("is-generating");
   }
 }
 
@@ -1054,7 +1218,11 @@ function populateCopyEditors(copy) {
   $("wb_desc").value = copy.weibo?.description || "";
   setTagsFor("wb_tags", copy.weibo?.tags || []);
 
-  $("x_text").value = $("opt_x_long").checked ? copy.x?.long_note || copy.x?.text || "" : copy.x?.text || "";
+  state.xDrafts = {
+    short: copy.x?.text || "",
+    long: copy.x?.long_note || copy.x?.text || "",
+  };
+  $("x_text").value = $("opt_x_long").checked ? state.xDrafts.long : state.xDrafts.short;
 
   ["dy_title", "sp_short", "sp_title", "wb_title", "x_text"].forEach((id) =>
     $(id).dispatchEvent(new Event("input"))
@@ -1062,6 +1230,8 @@ function populateCopyEditors(copy) {
 }
 
 function collectCopyFromEditors() {
+  const curX = $("x_text").value.trim();
+  const isLong = $("opt_x_long").checked;
   return {
     douyin: {
       title: $("dy_title").value.trim(),
@@ -1080,24 +1250,50 @@ function collectCopyFromEditors() {
       tags: [...state.tags.wb_tags],
     },
     x: {
-      text: $("x_text").value.trim(),
-      long_note: $("x_text").value.trim(),
+      text: (isLong ? state.xDrafts.short : curX).trim() || curX,
+      long_note: (isLong ? curX : state.xDrafts.long).trim() || curX,
     },
   };
 }
 
-async function submitPublish(dryRun) {
-  if (!state.bundle?.video?.file_path) {
-    await loadDemoBundle();
+async function copyPlatformCardText(plat) {
+  const data = collectCopyFromEditors();
+  let text = "";
+  if (plat === "x") {
+    text = $("x_text").value.trim();
+  } else {
+    const item = data[plat] || {};
+    const tagsStr = (item.tags || []).map((t) => `#${t}`).join(" ");
+    const parts = [item.short_title ? `[${item.short_title}]` : "", item.title || "", item.description || "", tagsStr].filter(Boolean);
+    text = parts.join("\n");
   }
-  if (!state.bundle?.video?.file_path) return;
+  if (!text) {
+    showToast("Nothing to copy yet.", "warning", 2000);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`Copied ${plat} copy to clipboard!`, "success", 2000);
+  } catch (_) {
+    showToast("Clipboard permission unavailable.", "warning");
+  }
+}
 
-  const platforms = ["douyin", "shipinhao", "weibo", "x"].filter((p) => $(`chk_${p}`).checked);
-  if (!platforms.length) return;
+function validateScheduleInput() {
+  const val = $("optSchedule").value.trim();
+  $("btnClearSchedule").classList.toggle("hidden", !val);
+  if (!val) {
+    $("schedulePill").classList.remove("invalid");
+    return true;
+  }
+  const ok = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/.test(val);
+  $("schedulePill").classList.toggle("invalid", !ok);
+  return ok;
+}
 
-  $("activityDrawer").classList.remove("hidden");
-
-  const body = {
+function buildPublishPayload(dryRun, overridePlatforms = null) {
+  const platforms = overridePlatforms || ["douyin", "shipinhao", "weibo", "x"].filter((p) => $(`chk_${p}`).checked);
+  return {
     video_path: state.bundle.video.file_path,
     poster_path: state.bundle.poster?.variants?.original || null,
     covers: state.bundle.poster?.variants || {},
@@ -1111,8 +1307,90 @@ async function submitPublish(dryRun) {
     },
     dry_run: dryRun,
   };
+}
 
-  setBusy(true, dryRun ? "Checking..." : "Publishing...");
+async function submitPublish(dryRun, overridePlatforms = null) {
+  if (!state.bundle?.video?.file_path) {
+    showToast("Load a video bundle first (or click Try Demo Bundle to test).", "warning", 4200);
+    const card = $("sourceBundleCard");
+    card?.classList.remove("pulse-highlight");
+    void card?.offsetWidth;
+    card?.classList.add("pulse-highlight");
+    $("inputFolderPath").focus();
+    return;
+  }
+
+  const platforms = overridePlatforms || ["douyin", "shipinhao", "weibo", "x"].filter((p) => $(`chk_${p}`).checked);
+  if (!platforms.length) {
+    showToast("Select at least one target platform.", "warning");
+    return;
+  }
+
+  if (!validateScheduleInput()) {
+    showToast("Invalid schedule format. Use YYYY-MM-DD HH:MM.", "warning");
+    $("optSchedule").focus();
+    return;
+  }
+
+  const body = buildPublishPayload(dryRun, platforms);
+  if (dryRun) {
+    await dispatchPublishRequest(body);
+    return;
+  }
+
+  // Live publish: run fast synchronous preflight check & show confirmation modal
+  setBusy(true, "Preflight...");
+  try {
+    const res = await fetch("/api/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const pf = await res.json();
+    if (!res.ok) throw new Error(pf.detail || "Preflight check failed");
+    state.pendingPublishBody = body;
+    renderConfirmPublishModal(body, pf);
+  } catch (err) {
+    showToast(`Preflight failed: ${err.message}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderConfirmPublishModal(body, pf) {
+  const v = state.bundle.video;
+  const dur = v.duration_label && v.duration_label !== "Ready to publish" ? ` · ${v.duration_label}` : "";
+  const sched = body.options.schedule ? ` · Scheduled: ${escapeHtml(body.options.schedule)}` : " · Immediate publish";
+  $("confirmVideoSummary").innerHTML = `<strong>${escapeHtml(v.file_name)}</strong> (${v.size_mb} MB${escapeHtml(dur)})${sched}`;
+
+  const list = $("confirmPlatformsList");
+  list.innerHTML = "";
+  Object.entries(pf.platforms || {}).forEach(([, item]) => {
+    const row = document.createElement("div");
+    row.className = "confirm-plat-row";
+    const statusLabel = item.status === "failed" ? "Blocked" : item.status === "warning" ? "Warning" : "Ready";
+    const issuesHtml = item.issues?.length
+      ? `<div class="confirm-plat-issues ${item.errors?.length ? "has-error" : "has-warn"}">${item.issues.map(escapeHtml).join("<br/>")}</div>`
+      : `<div class="confirm-plat-issues">${(item.notes || ["All checks passed"]).map(escapeHtml).join(" · ")}</div>`;
+    row.innerHTML = `
+      <div class="confirm-plat-head">
+        <span>${escapeHtml(item.label)}</span>
+        <span class="job-pill ${escapeHtml(item.status)}">${statusLabel}</span>
+      </div>
+      ${issuesHtml}
+    `;
+    list.appendChild(row);
+  });
+
+  $("btnProceedConfirmPublish").textContent = pf.ok ? "Confirm & Publish Now" : "Publish Anyway";
+  $("confirmPublishModal").classList.remove("hidden");
+}
+
+async function dispatchPublishRequest(body) {
+  switchDrawerTab("live");
+  $("activityDrawer").classList.remove("hidden");
+  $("btnRetryFailed").classList.add("hidden");
+  setBusy(true, body.dry_run ? "Checking..." : "Publishing...");
   try {
     const res = await fetch("/api/publish", {
       method: "POST",
@@ -1124,8 +1402,35 @@ async function submitPublish(dryRun) {
     startJobPolling(data.job);
   } catch (err) {
     appendLog(`Publish error: ${err.message}`);
+    showToast(`Publish failed: ${err.message}`, "error");
     setBusy(false);
   }
+}
+
+async function cancelActiveJob() {
+  if (!state.activeJobId) return;
+  $("btnCancelJob").disabled = true;
+  try {
+    const res = await fetch(`/api/jobs/${state.activeJobId}/cancel`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Cancel failed");
+    renderJobStatus(data.job);
+    showToast("Publish job cancelled.", "warning");
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+    setBusy(false);
+  } catch (err) {
+    showToast(`Cancel error: ${err.message}`, "error");
+  } finally {
+    $("btnCancelJob").disabled = false;
+  }
+}
+
+async function retryFailedPlatforms() {
+  if (!state.lastFailedPlatforms.length) return;
+  await submitPublish(false, [...state.lastFailedPlatforms]);
 }
 
 function startJobPolling(initialJob) {
@@ -1143,6 +1448,7 @@ function startJobPolling(initialJob) {
         clearInterval(state.pollTimer);
         state.pollTimer = null;
         setBusy(false);
+        fetchJobHistory();
       }
     } catch (_) {}
   }, 750);
@@ -1151,18 +1457,117 @@ function startJobPolling(initialJob) {
 function renderJobStatus(job) {
   const pills = $("jobPlatformPills");
   pills.innerHTML = "";
-  Object.entries(job.platform_states || {}).forEach(([, st]) => {
+  const states = job.platform_states || {};
+  const failed = [];
+  let runningPlat = null;
+  let warnCount = 0;
+
+  ["douyin", "shipinhao", "weibo", "x"].forEach((p) => {
+    const badge = $(`cardStatus_${p}`);
+    if (!badge) return;
+    const st = states[p];
+    if (!st) {
+      badge.classList.add("hidden");
+      return;
+    }
+    badge.classList.remove("hidden");
+    badge.className = `card-job-badge ${st.status}`;
+    badge.textContent = st.status;
+    badge.title = st.message || "";
+  });
+
+  Object.entries(states).forEach(([plat, st]) => {
     const span = document.createElement("span");
     span.className = `job-pill ${st.status}`;
     span.textContent = `${st.label.split(" ")[0]} · ${st.status}`;
-    span.title = st.message || "";
+    span.title = (st.issues && st.issues.length ? st.issues.join("\n") : st.message) || "";
     pills.appendChild(span);
+    if (st.status === "failed") failed.push(plat);
+    if (st.status === "warning") warnCount++;
+    if (st.status === "running") runningPlat = st.label.split(" ")[0];
   });
+
+  state.lastFailedPlatforms = failed;
+  const isRunning = job.status === "running";
+  $("btnCancelJob").classList.toggle("hidden", !isRunning);
+  $("btnRetryFailed").classList.toggle("hidden", isRunning || job.dry_run || failed.length === 0);
+
+  const prog = job.progress || { completed: 0, total: job.platforms?.length || 1, percent: 0 };
+  $("dockProgressBar").classList.toggle("hidden", !isRunning && prog.percent === 0);
+  $("dockProgressFill").style.width = `${isRunning ? Math.max(8, prog.percent) : 100}%`;
+  if (!isRunning) {
+    setTimeout(() => $("dockProgressBar").classList.add("hidden"), 1500);
+  }
+
+  const dot = $("dockStatusDot");
+  dot.className = "pulse-dot";
+  const summary = $("dockSummaryText");
+  if (isRunning) {
+    dot.classList.add("running");
+    summary.textContent = `${job.dry_run ? "Checking" : "Publishing"} ${prog.completed}/${prog.total}${runningPlat ? ` · ${runningPlat}` : ""}`;
+  } else if (job.status === "cancelled") {
+    dot.classList.add("warning");
+    summary.textContent = "Cancelled";
+  } else if (job.status === "failed" || job.status === "partial_failed") {
+    dot.classList.add("failed");
+    summary.textContent = `${failed.length} Failed · ${prog.total - failed.length} Ready`;
+  } else if (warnCount > 0) {
+    dot.classList.add("warning");
+    summary.textContent = `Passed (${warnCount} warning)`;
+  } else {
+    summary.textContent = job.dry_run ? `Preflight Passed (${prog.total}/${prog.total})` : `Completed (${prog.total}/${prog.total})`;
+  }
+
   if (job.logs?.length) {
     const logEl = $("jobLogs");
     logEl.textContent = job.logs.join("\n");
     logEl.scrollTop = logEl.scrollHeight;
   }
+}
+
+function switchDrawerTab(tab) {
+  state.activeDrawerTab = tab;
+  $("tabBtnLiveLog").classList.toggle("active", tab === "live");
+  $("tabBtnRecentJobs").classList.toggle("active", tab === "history");
+  $("drawerLivePane").classList.toggle("hidden", tab !== "live");
+  $("drawerHistoryPane").classList.toggle("hidden", tab !== "history");
+  if (tab === "history") {
+    fetchJobHistory();
+  }
+}
+
+async function fetchJobHistory() {
+  try {
+    const res = await fetch("/api/jobs");
+    const data = await res.json();
+    const list = $("recentJobsList");
+    list.innerHTML = "";
+    const jobs = data.jobs || [];
+    if (!jobs.length) {
+      list.innerHTML = `<span class="card-sub">No recent jobs recorded yet.</span>`;
+      return;
+    }
+    jobs.forEach((j) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "history-job-row";
+      const fileName = (j.video_path || "").split(/[\\/]/).pop() || "Job";
+      const when = j.created_at ? new Date(j.created_at * 1000).toLocaleString() : "";
+      const modeLabel = j.dry_run ? "Preflight" : "Live";
+      btn.innerHTML = `
+        <div class="history-job-meta">
+          <strong>${escapeHtml(fileName)} (${modeLabel})</strong>
+          <span>${escapeHtml(when)} · ${(j.platforms || []).join(", ")}</span>
+        </div>
+        <span class="job-pill ${escapeHtml(j.status === "completed" ? "success" : j.status === "partial_failed" ? "warning" : j.status)}">${escapeHtml(j.status)}</span>
+      `;
+      btn.addEventListener("click", () => {
+        renderJobStatus(j);
+        switchDrawerTab("live");
+      });
+      list.appendChild(btn);
+    });
+  } catch (_) {}
 }
 
 function appendLog(line) {

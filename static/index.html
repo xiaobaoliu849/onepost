@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OnePost — Douyin · Shipinhao · Weibo · X</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2.4" />
+  <link rel="stylesheet" href="/static/styles.css?v=2.5" />
 </head>
 <body>
   <div class="ambient-glow" aria-hidden="true"></div>
@@ -58,9 +58,17 @@
           <span>Sync</span>
         </button>
 
+        <button id="btnDeepVerifyAccounts" class="btn btn-ghost btn-sm" title="Verify saved cookies live against platforms">
+          <span>Verify Cookies</span>
+        </button>
+
         <button id="btnThemeToggle" class="btn btn-icon-round" title="Switch Light / Dark Studio Theme" aria-label="Toggle theme">
           <svg id="iconMoon" class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <svg id="iconSun" class="icon-sm hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
           </svg>
         </button>
 
@@ -327,10 +335,14 @@
                   <span class="net-tag">Direct CN IP &middot; Dual 3:4 + 4:3 Cover</span>
                 </div>
               </div>
-              <label class="ios-switch" title="Include Douyin in publish batch">
-                <input type="checkbox" id="chk_douyin" checked />
-                <span class="switch-slider"></span>
-              </label>
+              <div class="p-card-actions">
+                <span class="card-job-badge hidden" id="cardStatus_douyin"></span>
+                <button type="button" class="btn-copy-card" data-copy-plat="douyin" title="Copy formatted Douyin text">Copy</button>
+                <label class="ios-switch" title="Include Douyin in publish batch">
+                  <input type="checkbox" id="chk_douyin" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
             </header>
 
             <div class="p-field">
@@ -370,10 +382,14 @@
                   <span class="net-tag">Direct CN IP &middot; WeChat Ecosystem</span>
                 </div>
               </div>
-              <label class="ios-switch" title="Include Shipinhao in publish batch">
-                <input type="checkbox" id="chk_shipinhao" checked />
-                <span class="switch-slider"></span>
-              </label>
+              <div class="p-card-actions">
+                <span class="card-job-badge hidden" id="cardStatus_shipinhao"></span>
+                <button type="button" class="btn-copy-card" data-copy-plat="shipinhao" title="Copy formatted Shipinhao text">Copy</button>
+                <label class="ios-switch" title="Include Shipinhao in publish batch">
+                  <input type="checkbox" id="chk_shipinhao" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
             </header>
 
             <div class="p-split-2">
@@ -427,10 +443,14 @@
                   <span class="net-tag">Direct CN IP &middot; 16:9 HD Cover</span>
                 </div>
               </div>
-              <label class="ios-switch" title="Include Weibo in publish batch">
-                <input type="checkbox" id="chk_weibo" checked />
-                <span class="switch-slider"></span>
-              </label>
+              <div class="p-card-actions">
+                <span class="card-job-badge hidden" id="cardStatus_weibo"></span>
+                <button type="button" class="btn-copy-card" data-copy-plat="weibo" title="Copy formatted Weibo text">Copy</button>
+                <label class="ios-switch" title="Include Weibo in publish batch">
+                  <input type="checkbox" id="chk_weibo" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
             </header>
 
             <div class="p-field">
@@ -470,10 +490,14 @@
                   <span class="net-tag net-tag-proxy" id="xRouteBadge">Proxy Route</span>
                 </div>
               </div>
-              <label class="ios-switch" title="Include X in publish batch">
-                <input type="checkbox" id="chk_x" checked />
-                <span class="switch-slider"></span>
-              </label>
+              <div class="p-card-actions">
+                <span class="card-job-badge hidden" id="cardStatus_x"></span>
+                <button type="button" class="btn-copy-card" data-copy-plat="x" title="Copy formatted X post">Copy</button>
+                <label class="ios-switch" title="Include X in publish batch">
+                  <input type="checkbox" id="chk_x" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
             </header>
 
             <div class="p-field flex-grow">
@@ -504,14 +528,21 @@
 
     <!-- Floating Bottom Command & Activity Dock -->
     <footer class="publish-dock">
+      <div id="dockProgressBar" class="dock-progress-bar hidden">
+        <div id="dockProgressFill" class="dock-progress-fill" style="width: 0%"></div>
+      </div>
       <div class="dock-bar">
         <div class="dock-left">
-          <div class="schedule-pill">
-            <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <input type="text" id="optSchedule" placeholder="Optional schedule: YYYY-MM-DD HH:MM" />
+          <div class="schedule-pill" id="schedulePill">
+            <button type="button" id="btnPickSchedule" class="btn-schedule-icon" title="Pick date & time">
+              <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </button>
+            <input type="text" id="optSchedule" placeholder="Schedule: YYYY-MM-DD HH:MM" />
+            <input type="datetime-local" id="optSchedulePicker" class="sr-only-picker" tabindex="-1" aria-hidden="true" />
+            <button type="button" id="btnClearSchedule" class="btn-schedule-clear hidden" title="Clear schedule">&times;</button>
           </div>
 
           <label class="pill-check">
@@ -527,6 +558,12 @@
         </div>
 
         <div class="dock-right">
+          <button type="button" id="btnCancelJob" class="btn btn-danger-outline hidden">
+            <span>Cancel Job</span>
+          </button>
+          <button type="button" id="btnRetryFailed" class="btn btn-outline hidden">
+            <span>Retry Failed</span>
+          </button>
           <button id="btnDryRun" class="btn btn-outline">
             <span>Preflight Check</span>
           </button>
@@ -543,10 +580,22 @@
       <!-- Expandable Activity Drawer -->
       <div id="activityDrawer" class="activity-drawer hidden">
         <div class="drawer-head">
-          <span>Live Dispatch Log</span>
-          <button type="button" id="btnCloseDrawer" class="btn-text-xs">Collapse</button>
+          <div class="drawer-tabs">
+            <button type="button" id="tabBtnLiveLog" class="drawer-tab active">Live Log</button>
+            <button type="button" id="tabBtnRecentJobs" class="drawer-tab">Recent Jobs</button>
+          </div>
+          <div class="drawer-head-actions">
+            <button type="button" id="btnCopyLogs" class="btn-text-xs">Copy Logs</button>
+            <button type="button" id="btnClearLogs" class="btn-text-xs">Clear</button>
+            <button type="button" id="btnCloseDrawer" class="btn-text-xs">Collapse</button>
+          </div>
         </div>
-        <pre id="jobLogs" class="drawer-logs">Ready. Load a bundle and run Preflight Check or Publish Selected.</pre>
+        <div id="drawerLivePane">
+          <pre id="jobLogs" class="drawer-logs">Ready. Load a bundle and run Preflight Check or Publish Selected.</pre>
+        </div>
+        <div id="drawerHistoryPane" class="drawer-history hidden">
+          <div id="recentJobsList" class="recent-jobs-list"></div>
+        </div>
       </div>
     </footer>
   </div>
@@ -604,6 +653,15 @@
 
       <!-- Tab 2: Universal Cookie Paste from Everyday Chrome -->
       <div id="tabCookiePaste" class="connect-body hidden">
+        <div class="p-field">
+          <label>Target Platform</label>
+          <div id="pastePlatformSelect" class="paste-plat-row">
+            <button type="button" class="paste-plat-pill active" data-pplat="douyin">Douyin</button>
+            <button type="button" class="paste-plat-pill" data-pplat="shipinhao">Shipinhao</button>
+            <button type="button" class="paste-plat-pill" data-pplat="weibo">Weibo</button>
+            <button type="button" class="paste-plat-pill" data-pplat="x">X (Twitter)</button>
+          </div>
+        </div>
         <div id="xSpecificFields" class="hidden">
           <div class="x-guide-box">
             <strong>Quick X Cookie Paste:</strong> In your logged-in Chrome on <code>x.com</code>, press <kbd>F12</kbd> &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> &rarr; paste <code>auth_token</code> &amp; <code>ct0</code> (or use universal paste below):
@@ -658,7 +716,7 @@
           <div class="p-split-2 mt-10">
             <label class="setting-toggle-row">
               <span>Enable Proxy for X (Twitter)</span>
-              <span class="ios-switch"><input type="checkbox" id="cfg_x_use_proxy" checked /><span class="switch-slider"></span></span>
+              <span class="ios-switch"><input type="checkbox" id="cfg_x_use_proxy" /><span class="switch-slider"></span></span>
             </label>
             <div class="p-field">
               <label for="cfg_x_proxy">Local Proxy URL</label>
@@ -681,7 +739,21 @@
           </div>
           <div class="p-field mt-10">
             <label for="cfg_ai_key">API Key <span class="hint-inline">(Leave empty for built-in Smart SRT Composer)</span></label>
-            <input type="password" id="cfg_ai_key" class="clean-input" placeholder="sk-..." />
+            <div class="inline-test-row">
+              <input type="password" id="cfg_ai_key" class="clean-input" placeholder="sk-..." />
+              <button type="button" id="btnTestAi" class="btn btn-outline btn-sm">Test AI</button>
+            </div>
+            <span id="aiTestResult" class="ai-test-result"></span>
+          </div>
+          <div class="p-split-2 mt-10">
+            <div class="p-field">
+              <label for="cfg_sig_cn">Brand Signature (CN)</label>
+              <input type="text" id="cfg_sig_cn" class="clean-input" placeholder="Optional footer appended to CN posts" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_sig_en">Brand Signature (EN)</label>
+              <input type="text" id="cfg_sig_en" class="clean-input" placeholder="Optional footer appended to X posts" />
+            </div>
           </div>
         </div>
 
@@ -721,10 +793,16 @@
         </div>
 
         <div class="settings-section">
-          <h4>Browser Executable &amp; Optional MultiPost Extension</h4>
-          <div class="p-field">
-            <label for="cfg_chrome_path">Chrome / Edge Path</label>
-            <input type="text" id="cfg_chrome_path" class="clean-input" placeholder="C:/Program Files/Google/Chrome/Application/chrome.exe" />
+          <h4>Workspace, Browser &amp; MultiPost Extension</h4>
+          <div class="p-split-2">
+            <div class="p-field">
+              <label for="cfg_default_dir">Default Bundle Folder</label>
+              <input type="text" id="cfg_default_dir" class="clean-input" placeholder="D:\Highlights\Latest" />
+            </div>
+            <div class="p-field">
+              <label for="cfg_chrome_path">Chrome / Edge Path</label>
+              <input type="text" id="cfg_chrome_path" class="clean-input" placeholder="C:/Program Files/Google/Chrome/Application/chrome.exe" />
+            </div>
           </div>
           <div class="p-split-2 mt-10">
             <label class="setting-toggle-row">
@@ -736,6 +814,10 @@
               <input type="text" id="cfg_mp_url" class="clean-input" placeholder="http://127.0.0.1:10721/api/post" />
             </div>
           </div>
+          <div class="p-field mt-10">
+            <label for="cfg_mp_apikey">MultiPost Extension API Key <span class="hint-inline">(Optional)</span></label>
+            <input type="password" id="cfg_mp_apikey" class="clean-input" placeholder="Optional extension token" />
+          </div>
         </div>
       </div>
 
@@ -745,6 +827,27 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.4"></script>
+  <!-- Pre-Publish Confirmation Modal -->
+  <div id="confirmPublishModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="connect-sheet">
+      <div class="sheet-header">
+        <div>
+          <h2>Confirm Live Publish</h2>
+          <p class="card-sub">Preflight verification summary before dispatching to platforms</p>
+        </div>
+        <button type="button" id="btnCloseConfirmPublish" class="btn btn-icon-round" aria-label="Close">&times;</button>
+      </div>
+      <div class="connect-body">
+        <div id="confirmVideoSummary" class="x-guide-box"></div>
+        <div id="confirmPlatformsList" class="confirm-platforms-list"></div>
+      </div>
+      <div class="sheet-footer">
+        <button type="button" id="btnCancelConfirmPublish" class="btn btn-outline">Cancel</button>
+        <button type="button" id="btnProceedConfirmPublish" class="btn btn-publish">Confirm &amp; Publish Now</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=2.5"></script>
 </body>
 </html>
