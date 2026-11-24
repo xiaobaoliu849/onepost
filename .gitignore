@@ -1,0 +1,28 @@
+# --- Personal data: NEVER commit ---
+# Settings (API keys), Chrome profile (logged-in sessions), staged videos, job history, generated covers
+data/
+# Platform login cookies (Douyin / Shipinhao / Weibo / X)
+vendor/social-auto-upload/cookies/
+cookies/
+# Machine-specific vendor config (generated automatically from data/settings.json)
+vendor/social-auto-upload/conf.py
+# Douyin SMS code drop file & temporary login QR images
+verify_code.txt
+**/*login_qrcode*.png
+qrcode.png
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# --- Logs & OS ---
+logs/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
