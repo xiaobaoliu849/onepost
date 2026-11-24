@@ -4,10 +4,10 @@
 
 OnePost only handles **publishing**. It does not cut, transcode, or translate video. You bring the finished files and OnePost:
 
-- picks up the video (`.mp4/.mov/.mkv`), poster card (`.png/.jpg/.webp`), and karaoke subtitle (`.srt/.ass/.vtt`) from a folder
-- frames the poster card into `3:4`, `4:3`, and `16:9` covers, using a blurred backdrop so no title text gets cropped
-- reads the subtitles (including the 00:00 teaser hook) and writes a title, description, and hashtags for each platform's rules
-- publishes through **your real Chrome login**, so no headless QR codes get flagged by risk control
+- picks up the video (`.mp4/.mov/.mkv`), poster card (`.png/.jpg/.webp`), and karaoke subtitle (`.srt/.ass/.vtt`) from a folder or via full-window drag-and-drop with live upload progress and per-slot replacement
+- probes real video dimensions/duration, caches `3:4`, `4:3`, and `16:9` blurred-backdrop covers (capped `< 4.5 MB` for Weibo), and provides a clickable synced transcript + `00:00` teaser jump
+- reads the subtitles (including the 00:00 teaser hook) and writes a title, description, and hashtags for each platform's rules (with an offline tone-aware fallback and inline AI endpoint tester)
+- validates cookies, schedules, cover requirements, and length caps in **Preflight Check**, confirms live dispatches before starting, supports **Cancel Job**, **Retry Failed**, and **Recent Jobs** history, and publishes through **your real Chrome login** so no headless QR codes get flagged by risk control
 
 ## Quick start (Windows)
 
@@ -61,6 +61,12 @@ static/              web studio UI
 vendor/social-auto-upload/   Douyin / Shipinhao / Weibo engine (MIT, patched)
 publish_cli.py       one-command CLI
 ```
+
+## Testing & Roadmap
+```powershell
+python -m pytest -v
+```
+See [`docs/IMPROVEMENT_ROADMAP.md`](docs/IMPROVEMENT_ROADMAP.md) for the completed audit fixes and Phase 2 roadmap.
 
 ## Credits
 - [dreammis/social-auto-upload](https://github.com/dreammis/social-auto-upload) (MIT). Vendored and patched to use local Chrome and to attach to a live Chrome session over CDP.

@@ -66,11 +66,11 @@
 - [x] Add `Escape` modal dismissal, theme icon toggle (`moon`/`sun`), responsive navbar wrapping, and `:focus-visible` styles
 - [x] Verify JS syntax & `pytest` suite
 
-### [/] Milestone 5: End-to-End Verification Suite, Documentation & Final Polish
-- [ ] Add `tests/test_ui_and_api_e2e.py` verifying DOM ID integrity (`static/app.js` vs `static/index.html`) and isolated end-to-end API flows
-- [ ] Update `README.md` with new studio features & test command
-- [ ] Finalize `docs/IMPROVEMENT_ROADMAP.md` with Phase 2 Next-Step evolution plan
-- [ ] Run full `python -m pytest -v`, verify clean `git status`, commit & push
+### [x] Milestone 5: End-to-End Verification Suite, Documentation & Final Polish
+- [x] Add `tests/test_ui_and_api_e2e.py` verifying DOM ID integrity (`static/app.js` vs `static/index.html`) and isolated end-to-end API flows
+- [x] Update `README.md` with new studio features & test command
+- [x] Finalize `docs/IMPROVEMENT_ROADMAP.md` with Phase 2 Next-Step evolution plan
+- [x] Run full `python -m pytest -v`, verify clean `git status`, commit & push
 
 ---
 
