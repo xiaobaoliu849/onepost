@@ -4,10 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OnePost — Douyin · Shipinhao · Weibo · X</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2.3" />
+  <link rel="stylesheet" href="/static/styles.css?v=2.4" />
 </head>
 <body>
   <div class="ambient-glow" aria-hidden="true"></div>
+  <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+  <div id="globalDropOverlay" class="global-drop-overlay hidden" aria-hidden="true">
+    <div class="global-drop-card">
+      <strong>Drop files to load into OnePost</strong>
+      <span>Supports Video (.mp4/.mov/.mkv), Poster Card (.png/.jpg/.webp) &amp; Karaoke (.srt/.ass/.vtt)</span>
+    </div>
+  </div>
 
   <div class="app-container">
     <!-- Top Glass Navigation -->
@@ -77,7 +84,7 @@
       <!-- LEFT STAGE: Source Bundle, Cinema Karaoke Monitor & Poster Gallery -->
       <aside class="stage-column">
         <!-- Card 1: Bundle Drop & Folder Scanner -->
-        <div class="surface-card">
+        <div class="surface-card" id="sourceBundleCard">
           <div class="card-head">
             <div>
               <span class="step-pill">01 &middot; Source Bundle</span>
@@ -109,7 +116,60 @@
             </div>
             <div class="upload-tile-text">
               <strong>Drop Video + Poster Card + Karaoke SRT</strong>
-              <span>Auto-detects <code>.mp4</code>, <code>poster.png</code> &amp; <code>karaoke.srt</code></span>
+              <span>Auto-detects <code>.mp4</code>, <code>poster.png</code> &amp; <code>karaoke.srt</code> (or drop anywhere)</span>
+            </div>
+          </div>
+
+          <!-- Upload & Processing Stepper -->
+          <div id="uploadProgressPanel" class="upload-progress-panel hidden">
+            <div class="upload-progress-head">
+              <span id="uploadStageLabel" class="upload-stage-label">Uploading files...</span>
+              <div class="upload-progress-meta">
+                <span id="uploadPercentLabel" class="upload-pct-label">0%</span>
+                <button type="button" id="btnCancelUpload" class="btn-text-danger">Cancel</button>
+              </div>
+            </div>
+            <div class="progress-track">
+              <div id="uploadProgressFill" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="upload-steps">
+              <span id="uStepTransfer" class="u-step active">1. Transfer</span>
+              <span id="uStepProcess" class="u-step">2. Probe &amp; Frame</span>
+              <span id="uStepCopy" class="u-step">3. Draft Copy</span>
+            </div>
+          </div>
+
+          <!-- 3-Slot Bundle Asset Strip -->
+          <div id="bundleAssetSlots" class="bundle-asset-slots hidden">
+            <input type="file" id="slotInputVideo" accept=".mp4,.mov,.mkv,.webm,.m4v" hidden />
+            <input type="file" id="slotInputPoster" accept=".png,.jpg,.jpeg,.webp" hidden />
+            <input type="file" id="slotInputSubtitle" accept=".srt,.ass,.ssa,.vtt" hidden />
+
+            <div class="asset-slot" data-slot="video">
+              <div class="slot-info">
+                <span class="slot-kind">Video</span>
+                <strong id="slotVideoName" class="slot-name">Missing</strong>
+                <span id="slotVideoMeta" class="slot-meta">Drop or pick .mp4/.mov</span>
+              </div>
+              <button type="button" id="btnReplaceVideo" class="btn-slot-replace">Replace</button>
+            </div>
+
+            <div class="asset-slot" data-slot="poster">
+              <div class="slot-info">
+                <span class="slot-kind">Poster Card</span>
+                <strong id="slotPosterName" class="slot-name">Missing</strong>
+                <span id="slotPosterMeta" class="slot-meta">3:4 · 4:3 · 16:9</span>
+              </div>
+              <button type="button" id="btnReplacePoster" class="btn-slot-replace">Replace</button>
+            </div>
+
+            <div class="asset-slot" data-slot="subtitle">
+              <div class="slot-info">
+                <span class="slot-kind">Karaoke SRT</span>
+                <strong id="slotSubName" class="slot-name">Missing</strong>
+                <span id="slotSubMeta" class="slot-meta">.srt / .ass / .vtt</span>
+              </div>
+              <button type="button" id="btnReplaceSubtitle" class="btn-slot-replace">Replace</button>
             </div>
           </div>
 
@@ -158,9 +218,21 @@
           </div>
 
           <!-- Extracted 00:00 Teaser Hook Callout -->
-          <div id="teaserHookBox" class="teaser-callout hidden">
-            <div class="teaser-callout-badge">00:00 TEASER HOOK</div>
+          <div id="teaserHookBox" class="teaser-callout clickable hidden" role="button" tabindex="0" title="Click to jump playback to 00:00 teaser hook">
+            <div class="teaser-callout-head">
+              <span class="teaser-callout-badge">00:00 TEASER HOOK</span>
+              <span class="teaser-jump-hint">Jump 00:00 &#9656;</span>
+            </div>
             <p id="teaserHookText"></p>
+          </div>
+
+          <!-- Collapsible Synced Timestamped Transcript -->
+          <div id="transcriptSection" class="transcript-section hidden">
+            <button type="button" id="transcriptToggleBtn" class="transcript-toggle-btn">
+              <span>Synced Transcript</span>
+              <span id="transcriptCountBadge" class="badge badge-neutral">0 lines</span>
+            </button>
+            <div id="transcriptList" class="transcript-list hidden"></div>
           </div>
         </div>
 
@@ -480,10 +552,15 @@
   </div>
 
   <!--Poster Lightbox Preview-->
-  <div id="posterLightbox" class="modal-overlay hidden">
+  <div id="posterLightbox" class="modal-overlay hidden" role="dialog" aria-modal="true">
     <div class="lightbox-inner">
+      <div class="lightbox-caption" id="lightboxCaption">3:4 Douyin &amp; Shipinhao</div>
       <img id="posterPreviewImg" alt="Full poster preview" />
-      <button type="button" id="btnCloseLightbox" class="btn btn-soft">Close Preview</button>
+      <div class="lightbox-toolbar">
+        <button type="button" id="btnLightboxPrev" class="btn btn-outline btn-sm">&larr; Prev Ratio</button>
+        <button type="button" id="btnCloseLightbox" class="btn btn-soft btn-sm">Close Preview</button>
+        <button type="button" id="btnLightboxNext" class="btn btn-outline btn-sm">Next Ratio &rarr;</button>
+      </div>
     </div>
   </div>
 
@@ -668,6 +745,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.3"></script>
+  <script src="/static/app.js?v=2.4"></script>
 </body>
 </html>

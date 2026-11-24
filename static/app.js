@@ -5,6 +5,7 @@ const state = {
   settings: null,
   accounts: {},
   subtitleCues: [],
+  subtitleSentences: [],
   tags: {
     dy_tags: [],
     sp_tags: [],
@@ -12,9 +13,33 @@ const state = {
   },
   activeJobId: null,
   pollTimer: null,
+  activeUploadXhr: null,
+  lightboxIdx: 0,
 };
 
+const POSTER_VARIANTS = [
+  { key: "portrait_3x4", label: "3:4 Douyin & Shipinhao" },
+  { key: "landscape_4x3", label: "4:3 Dual Cover" },
+  { key: "weibo_cover", label: "16:9 Weibo Cover" },
+];
+
 const $ = (id) => document.getElementById(id);
+
+function showToast(message, type = "info", durationMs = 4200) {
+  const stack = $("toastStack");
+  if (!stack) return;
+  const item = document.createElement("div");
+  item.className = `toast-item ${type}`;
+  item.innerHTML = `<span>${escapeHtml(message)}</span><button type="button" class="toast-close" aria-label="Dismiss">&times;</button>`;
+  const close = () => {
+    item.remove();
+  };
+  item.querySelector(".toast-close").addEventListener("click", close);
+  stack.appendChild(item);
+  if (durationMs > 0) {
+    setTimeout(close, durationMs);
+  }
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
@@ -44,17 +69,26 @@ function bindEvents() {
     if (e.key === "Enter") scanFolder();
   });
 
-  // Drag & Drop Upload
+  // Drag & Drop Upload (full-window + dropZone without child flicker)
   const dz = $("dropZone");
   const fi = $("fileInputBundle");
+  let globalDragDepth = 0;
+
   dz.addEventListener("click", () => fi.click());
   dz.addEventListener("dragover", (e) => {
     e.preventDefault();
     dz.classList.add("dragover");
   });
-  dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+  dz.addEventListener("dragleave", (e) => {
+    if (!dz.contains(e.relatedTarget)) {
+      dz.classList.remove("dragover");
+    }
+  });
   dz.addEventListener("drop", async (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    globalDragDepth = 0;
+    $("globalDropOverlay").classList.add("hidden");
     dz.classList.remove("dragover");
     if (e.dataTransfer.files?.length) {
       await uploadDroppedFiles(e.dataTransfer.files);
@@ -64,6 +98,53 @@ function bindEvents() {
     if (fi.files?.length) {
       await uploadDroppedFiles(fi.files);
     }
+  });
+
+  document.addEventListener("dragenter", (e) => {
+    if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes("Files")) {
+      globalDragDepth += 1;
+      $("globalDropOverlay").classList.remove("hidden");
+    }
+  });
+  document.addEventListener("dragover", (e) => {
+    if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes("Files")) {
+      e.preventDefault();
+    }
+  });
+  document.addEventListener("dragleave", () => {
+    globalDragDepth = Math.max(0, globalDragDepth - 1);
+    if (globalDragDepth === 0) {
+      $("globalDropOverlay").classList.add("hidden");
+    }
+  });
+  document.addEventListener("drop", async (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    globalDragDepth = 0;
+    $("globalDropOverlay").classList.add("hidden");
+    dz.classList.remove("dragover");
+    await uploadDroppedFiles(e.dataTransfer.files);
+  });
+
+  // Upload cancellation & 3-slot replacement buttons
+  $("btnCancelUpload").addEventListener("click", () => {
+    if (state.activeUploadXhr) {
+      state.activeUploadXhr.abort();
+      state.activeUploadXhr = null;
+      showToast("Upload cancelled.", "warning");
+    }
+  });
+  $("btnReplaceVideo").addEventListener("click", () => $("slotInputVideo").click());
+  $("btnReplacePoster").addEventListener("click", () => $("slotInputPoster").click());
+  $("btnReplaceSubtitle").addEventListener("click", () => $("slotInputSubtitle").click());
+  $("slotInputVideo").addEventListener("change", async () => {
+    if ($("slotInputVideo").files?.length) await uploadDroppedFiles($("slotInputVideo").files, "video");
+  });
+  $("slotInputPoster").addEventListener("change", async () => {
+    if ($("slotInputPoster").files?.length) await uploadDroppedFiles($("slotInputPoster").files, "poster");
+  });
+  $("slotInputSubtitle").addEventListener("change", async () => {
+    if ($("slotInputSubtitle").files?.length) await uploadDroppedFiles($("slotInputSubtitle").files, "subtitle");
   });
 
   // Candidate overrides
@@ -78,26 +159,36 @@ function bindEvents() {
     });
   });
 
-  // Side-by-side poster thumbnails -> click to enlarge in lightbox
-  document.querySelectorAll(".poster-thumb").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".poster-thumb").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const variant = btn.dataset.variant;
-      const src = state.bundle?.poster?.variants?.[variant] || state.bundle?.poster?.variants?.original;
-      if (src) {
-        $("posterPreviewImg").src = `/api/media?path=${encodeURIComponent(src)}&t=${Date.now()}`;
-        $("posterLightbox").classList.remove("hidden");
-      }
-    });
+  // Side-by-side poster thumbnails -> click to enlarge in lightbox with Prev/Next navigation
+  document.querySelectorAll(".poster-thumb").forEach((btn, idx) => {
+    btn.addEventListener("click", () => openLightboxByIndex(idx));
   });
+  $("btnLightboxPrev").addEventListener("click", () => openLightboxByIndex((state.lightboxIdx + POSTER_VARIANTS.length - 1) % POSTER_VARIANTS.length));
+  $("btnLightboxNext").addEventListener("click", () => openLightboxByIndex((state.lightboxIdx + 1) % POSTER_VARIANTS.length));
   $("btnCloseLightbox").addEventListener("click", () => $("posterLightbox").classList.add("hidden"));
   $("posterLightbox").addEventListener("click", (e) => {
     if (e.target === $("posterLightbox")) $("posterLightbox").classList.add("hidden");
   });
 
-  // Synced Karaoke playback
+  // Synced Karaoke playback, clickable teaser hook & transcript toggle
   $("videoPreview").addEventListener("timeupdate", syncKaraokeCue);
+  $("teaserHookBox").addEventListener("click", jumpToTeaserHook);
+  $("teaserHookBox").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      jumpToTeaserHook();
+    }
+  });
+  $("transcriptToggleBtn").addEventListener("click", () => {
+    $("transcriptList").classList.toggle("hidden");
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!$("posterLightbox").classList.contains("hidden")) {
+      if (e.key === "ArrowLeft") openLightboxByIndex((state.lightboxIdx + POSTER_VARIANTS.length - 1) % POSTER_VARIANTS.length);
+      if (e.key === "ArrowRight") openLightboxByIndex((state.lightboxIdx + 1) % POSTER_VARIANTS.length);
+    }
+  });
 
   // Magic prompt & tone chips
   $("btnGenerateCopy").addEventListener("click", regenerateCopy);
@@ -538,8 +629,10 @@ async function loadDemoBundle() {
     if (!res.ok) throw new Error(data.detail || "Failed to load demo");
     $("inputFolderPath").value = data.bundle.folder_path;
     applyBundleAndCopy(data.bundle, data.copy);
+    showToast("Demo bundle loaded!", "success");
   } catch (err) {
     appendLog(`Error: ${err.message}`);
+    showToast(`Failed to load demo: ${err.message}`, "error");
   } finally {
     setBusy(false);
   }
@@ -549,6 +642,7 @@ async function scanFolder(overrides = {}) {
   const folderPath = $("inputFolderPath").value.trim();
   if (!folderPath) {
     $("inputFolderPath").focus();
+    showToast("Paste a bundle folder path first.", "warning");
     return;
   }
   setBusy(true, "Scanning...");
@@ -561,30 +655,202 @@ async function scanFolder(overrides = {}) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Scan failed");
     applyBundleAndCopy(data.bundle, data.copy);
+    showToast(`Scanned '${data.bundle.bundle_name}'`, "success");
   } catch (err) {
     $("activityDrawer").classList.remove("hidden");
     appendLog(`Scan error: ${err.message}`);
+    showToast(`Scan failed: ${err.message}`, "error");
   } finally {
     setBusy(false);
   }
 }
 
-async function uploadDroppedFiles(fileList) {
-  setBusy(true, "Importing files...");
+function setUploadStepper(stage, pct, stageLabel) {
+  const panel = $("uploadProgressPanel");
+  panel.classList.remove("hidden");
+  $("uploadStageLabel").textContent = stageLabel;
+  $("uploadPercentLabel").textContent = `${pct}%`;
+  $("uploadProgressFill").style.width = `${pct}%`;
+
+  const steps = ["uStepTransfer", "uStepProcess", "uStepCopy"];
+  steps.forEach((id, idx) => {
+    const el = $(id);
+    el.classList.toggle("done", idx < stage);
+    el.classList.toggle("active", idx === stage);
+  });
+}
+
+async function uploadDroppedFiles(fileList, slotMode = "bundle") {
+  const fd = new FormData();
+  Array.from(fileList).forEach((f) => fd.append("files", f));
+  fd.append("bundle_title", $("inputUserHint").value.trim());
+
+  if (slotMode !== "bundle" && state.bundle) {
+    if (slotMode !== "video" && state.bundle.video?.file_path) {
+      fd.append("existing_video", state.bundle.video.file_path);
+    }
+    if (slotMode !== "poster" && state.bundle.poster?.variants?.original) {
+      fd.append("existing_poster", state.bundle.poster.variants.original);
+    }
+    if (slotMode !== "subtitle" && state.bundle.subtitle?.file_path) {
+      fd.append("existing_subtitle", state.bundle.subtitle.file_path);
+    }
+  }
+
+  setBusy(true, "Uploading...");
+  setUploadStepper(0, 2, "Preparing file upload...");
+  let copyTimer = null;
+
   try {
-    const fd = new FormData();
-    Array.from(fileList).forEach((f) => fd.append("files", f));
-    fd.append("bundle_title", $("inputUserHint").value.trim());
-    const res = await fetch("/api/bundle/upload", { method: "POST", body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Upload failed");
+    const data = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      state.activeUploadXhr = xhr;
+      xhr.open("POST", "/api/bundle/upload");
+
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        const pct = Math.min(99, Math.round((ev.loaded / Math.max(ev.total, 1)) * 100));
+        const loadedMb = (ev.loaded / (1024 * 1024)).toFixed(1);
+        const totalMb = (ev.total / (1024 * 1024)).toFixed(1);
+        if (ev.loaded < ev.total) {
+          setUploadStepper(0, Math.round(pct * 0.72), `Uploading files... ${pct}% (${loadedMb} / ${totalMb} MB)`);
+        } else {
+          setUploadStepper(1, 82, "Analyzing video & framing covers...");
+          if (!copyTimer) {
+            copyTimer = setTimeout(() => setUploadStepper(2, 94, "Drafting 4-platform copy..."), 700);
+          }
+        }
+      };
+
+      xhr.onload = () => {
+        if (copyTimer) clearTimeout(copyTimer);
+        let parsed = {};
+        try {
+          parsed = JSON.parse(xhr.responseText || "{}");
+        } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploadStepper(3, 100, "Bundle ready!");
+          resolve(parsed);
+        } else {
+          reject(new Error(parsed.detail || `Upload failed (HTTP ${xhr.status})`));
+        }
+      };
+      xhr.onerror = () => {
+        if (copyTimer) clearTimeout(copyTimer);
+        reject(new Error("Network error while uploading files."));
+      };
+      xhr.onabort = () => {
+        if (copyTimer) clearTimeout(copyTimer);
+        reject(new Error("UPLOAD_ABORTED"));
+      };
+      xhr.send(fd);
+    });
+
     $("inputFolderPath").value = data.bundle.folder_path;
     applyBundleAndCopy(data.bundle, data.copy);
+    if (data.ignored_files?.length) {
+      showToast(`Skipped unsupported file(s): ${data.ignored_files.join(", ")}`, "warning", 5500);
+    } else {
+      showToast(`Loaded '${data.bundle.bundle_name}' successfully!`, "success");
+    }
   } catch (err) {
-    appendLog(`Upload error: ${err.message}`);
+    if (err.message !== "UPLOAD_ABORTED") {
+      appendLog(`Upload error: ${err.message}`);
+      showToast(err.message, "error", 5200);
+    }
   } finally {
+    if (copyTimer) clearTimeout(copyTimer);
+    state.activeUploadXhr = null;
+    $("fileInputBundle").value = "";
+    $("slotInputVideo").value = "";
+    $("slotInputPoster").value = "";
+    $("slotInputSubtitle").value = "";
+    setTimeout(() => $("uploadProgressPanel").classList.add("hidden"), 450);
     setBusy(false);
   }
+}
+
+function renderAssetSlots(bundle) {
+  $("bundleAssetSlots").classList.remove("hidden");
+
+  const v = bundle.video;
+  const vSlot = document.querySelector('.asset-slot[data-slot="video"]');
+  vSlot.classList.toggle("ready", Boolean(v));
+  $("slotVideoName").textContent = v ? v.file_name : "Missing";
+  if (v) {
+    const dims = v.width && v.height ? `${v.width}×${v.height}` : v.aspect_label;
+    const dur = v.duration_label && v.duration_label !== "Ready to publish" ? `${v.duration_label} · ` : "";
+    $("slotVideoMeta").textContent = `${dur}${dims} · ${v.size_mb} MB`;
+    $("btnReplaceVideo").textContent = "Replace";
+  } else {
+    $("slotVideoMeta").textContent = "Drop or pick .mp4/.mov";
+    $("btnReplaceVideo").textContent = "Add";
+  }
+
+  const p = bundle.poster;
+  const hasPoster = Boolean(p?.variants?.original);
+  const pSlot = document.querySelector('.asset-slot[data-slot="poster"]');
+  pSlot.classList.toggle("ready", hasPoster);
+  $("slotPosterName").textContent = hasPoster ? (p.file_name || "Poster Ready") : "Missing";
+  $("slotPosterMeta").textContent = hasPoster ? "3:4 · 4:3 · 16:9 framed" : "Drop or pick .png/.jpg";
+  $("btnReplacePoster").textContent = hasPoster ? "Replace" : "Add";
+
+  const s = bundle.subtitle;
+  const sSlot = document.querySelector('.asset-slot[data-slot="subtitle"]');
+  sSlot.classList.toggle("ready", Boolean(s));
+  $("slotSubName").textContent = s ? s.file_name : "Missing";
+  $("slotSubMeta").textContent = s
+    ? `${s.cue_count} cues · ${s.is_karaoke ? "Karaoke" : s.format.toUpperCase()}`
+    : "Drop or pick .srt/.ass";
+  $("btnReplaceSubtitle").textContent = s ? "Replace" : "Add";
+}
+
+function openLightboxByIndex(idx) {
+  state.lightboxIdx = idx;
+  const item = POSTER_VARIANTS[idx] || POSTER_VARIANTS[0];
+  document.querySelectorAll(".poster-thumb").forEach((b, i) => b.classList.toggle("active", i === idx));
+  const src = state.bundle?.poster?.variants?.[item.key] || state.bundle?.poster?.variants?.original;
+  if (src) {
+    $("lightboxCaption").textContent = item.label;
+    $("posterPreviewImg").src = `/api/media?path=${encodeURIComponent(src)}&t=${Date.now()}`;
+    $("posterLightbox").classList.remove("hidden");
+  }
+}
+
+function jumpToTeaserHook() {
+  const video = $("videoPreview");
+  if (!video.src) return;
+  video.currentTime = 0;
+  video.play().catch(() => {});
+}
+
+function renderTranscriptList(sentences) {
+  state.subtitleSentences = sentences || [];
+  const section = $("transcriptSection");
+  const list = $("transcriptList");
+  if (!state.subtitleSentences.length) {
+    section.classList.add("hidden");
+    list.innerHTML = "";
+    return;
+  }
+  section.classList.remove("hidden");
+  $("transcriptCountBadge").textContent = `${state.subtitleSentences.length} lines`;
+  list.innerHTML = "";
+  state.subtitleSentences.forEach((item, idx) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "transcript-row";
+    row.dataset.idx = String(idx);
+    row.innerHTML = `<span class="transcript-time">[${escapeHtml(item.time_label)}]</span><span>${escapeHtml(item.text)}</span>`;
+    row.addEventListener("click", () => {
+      const video = $("videoPreview");
+      if (video.src) {
+        video.currentTime = Number(item.start_sec || 0);
+        video.play().catch(() => {});
+      }
+    });
+    list.appendChild(row);
+  });
 }
 
 function applyBundleAndCopy(bundle, copy) {
@@ -593,6 +859,8 @@ function applyBundleAndCopy(bundle, copy) {
 
   $("bundleBadge").textContent = bundle.bundle_name || "Ready";
   $("bundleBadge").className = "badge badge-success";
+
+  renderAssetSlots(bundle);
 
   const cands = bundle.candidates || {};
   const hasMultiple =
@@ -615,7 +883,9 @@ function applyBundleAndCopy(bundle, copy) {
   if (bundle.video?.file_path) {
     videoEl.src = `/api/media?path=${encodeURIComponent(bundle.video.file_path)}`;
     $("videoEmptyState").classList.add("hidden");
-    $("videoSpecsLabel").textContent = `${bundle.video.file_name} · ${bundle.video.size_mb} MB`;
+    const durPart = bundle.video.duration_label && bundle.video.duration_label !== "Ready to publish" ? `${bundle.video.duration_label} · ` : "";
+    const dimPart = bundle.video.width && bundle.video.height ? `${bundle.video.width}×${bundle.video.height} · ` : "";
+    $("videoSpecsLabel").textContent = `${bundle.video.file_name} · ${durPart}${dimPart}${bundle.video.size_mb} MB`;
   } else {
     videoEl.removeAttribute("src");
     $("videoEmptyState").classList.remove("hidden");
@@ -625,10 +895,12 @@ function applyBundleAndCopy(bundle, copy) {
   // Karaoke SRT
   const sub = bundle.subtitle;
   state.subtitleCues = sub?.cues || [];
+  renderTranscriptList(sub?.sentences || []);
   if (sub) {
     $("karaokeStatusBadge").textContent = sub.is_karaoke
       ? `KARAOKE ACTIVE · ${sub.cue_count} CUES`
       : `SUBTITLES · ${sub.cue_count} CUES`;
+    $("karaokeLiveLine").classList.remove("muted-gap");
     $("karaokeLiveLine").innerHTML = state.subtitleCues.length
       ? formatKaraokeHtml(state.subtitleCues[0].raw_text, state.subtitleCues[0].clean_text)
       : "Subtitle loaded.";
@@ -640,6 +912,7 @@ function applyBundleAndCopy(bundle, copy) {
     }
   } else {
     $("karaokeStatusBadge").textContent = "NO SRT FILE";
+    $("karaokeLiveLine").classList.add("muted-gap");
     $("karaokeLiveLine").textContent = "Add a karaoke .srt file to preview synced highlights";
     $("teaserHookBox").classList.add("hidden");
   }
@@ -699,9 +972,26 @@ function populateSelect(id, items, selectedVal) {
 function syncKaraokeCue() {
   if (!state.subtitleCues.length) return;
   const t = $("videoPreview").currentTime;
+  const lineEl = $("karaokeLiveLine");
   const active = state.subtitleCues.find((c) => t >= c.start_sec && t <= c.end_sec);
   if (active) {
-    $("karaokeLiveLine").innerHTML = formatKaraokeHtml(active.raw_text, active.clean_text);
+    lineEl.classList.remove("muted-gap");
+    lineEl.innerHTML = formatKaraokeHtml(active.raw_text, active.clean_text);
+  } else if (state.subtitleCues.length) {
+    lineEl.classList.add("muted-gap");
+    lineEl.textContent = "...";
+  }
+
+  if (state.subtitleSentences.length) {
+    const activeSentIdx = state.subtitleSentences.findIndex((s) => t >= s.start_sec && t <= s.end_sec);
+    const list = $("transcriptList");
+    list.querySelectorAll(".transcript-row").forEach((row, idx) => {
+      const isAct = idx === activeSentIdx;
+      row.classList.toggle("active", isAct);
+      if (isAct && !list.classList.contains("hidden")) {
+        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    });
   }
 }
 
@@ -711,7 +1001,8 @@ function formatKaraokeHtml(rawText, cleanText) {
   safe = safe
     .replace(/&lt;u&gt;(.*?)&lt;\/u&gt;/gi, '<span class="k-hl">$1</span>')
     .replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/gi, "<strong>$1</strong>")
-    .replace(/&lt;font\s+color=&quot;([^&]+)&quot;&gt;(.*?)&lt;\/font&gt;/gi, '<span class="k-hl">$2</span>')
+    .replace(/&lt;i&gt;(.*?)&lt;\/i&gt;/gi, "<em>$1</em>")
+    .replace(/&lt;font\s+color=(?:&quot;|&#39;|')([^&"']+)(?:&quot;|&#39;|')&gt;(.*?)&lt;\/font&gt;/gi, '<span class="k-hl">$2</span>')
     .replace(/\{[^}]*\}/g, "");
   return safe.replace(/\r?\n/g, " &middot; ");
 }

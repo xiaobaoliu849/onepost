@@ -48,16 +48,16 @@
 - [x] Update `publish_cli.py` for preflight issue reporting and clean `KeyboardInterrupt` job cancellation
 - [x] Add `tests/test_publisher_preflight.py` & verify all tests pass
 
-### [/] Milestone 3: Frontend Upload Progress, 3-Slot Asset Manager & Interactive Karaoke/Poster Experience
-- [ ] Add non-blocking Toast Notification stack (`#toastStack`)
-- [ ] Replace upload `fetch` with `XMLHttpRequest` progress + stage stepper + Cancel Upload button
-- [ ] Fix `dragDepth` dragover/dragleave flicker & add full-window drag-and-drop overlay
-- [ ] Add 3-Slot Bundle Asset Strip (Video / Poster Card / Karaoke SRT) with per-slot Replace/Add actions
-- [ ] Clear karaoke caption during silent playback gaps, support single-quoted tags/`<i>`, make Teaser Hook seek to `00:00`, and add collapsible clickable Synced Transcript panel
-- [ ] Upgrade Poster Lightbox with active ratio label and Prev/Next + Arrow-key navigation
-- [ ] Verify JS syntax & `pytest` suite
+### [x] Milestone 3: Frontend Upload Progress, 3-Slot Asset Manager & Interactive Karaoke/Poster Experience
+- [x] Add non-blocking Toast Notification stack (`#toastStack`)
+- [x] Replace upload `fetch` with `XMLHttpRequest` progress + stage stepper + Cancel Upload button
+- [x] Fix `dragDepth` dragover/dragleave flicker & add full-window drag-and-drop overlay
+- [x] Add 3-Slot Bundle Asset Strip (Video / Poster Card / Karaoke SRT) with per-slot Replace/Add actions
+- [x] Clear karaoke caption during silent playback gaps, support single-quoted tags/`<i>`, make Teaser Hook seek to `00:00`, and add collapsible clickable Synced Transcript panel
+- [x] Upgrade Poster Lightbox with active ratio label and Prev/Next + Arrow-key navigation
+- [x] Verify JS syntax & `pytest` suite
 
-### [ ] Milestone 4: Composer Interactions, Connect Modal Fix, Settings & Publish Command Dock
+### [/] Milestone 4: Composer Interactions, Connect Modal Fix, Settings & Publish Command Dock
 - [ ] Fix Connect Modal Tab 2 with 4-platform pill selector + Deep Verify button
 - [ ] Add per-card Copy button, live Job Status badge, non-destructive `btnGenerateCopy` loading state, and dual short/long X draft memory (`state.xDrafts`)
 - [ ] Preserve `multipost.api_key` in Settings, add `default_watch_dir` + CN/EN brand signatures + **Test AI Connection** button
