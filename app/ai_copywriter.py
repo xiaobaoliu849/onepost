@@ -127,6 +127,19 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return json.loads(cleaned)
 
 
+def _detect_hint_mode(user_hint: str) -> str:
+    low = (user_hint or "").lower()
+    if any(k in low for k in ("反直觉", "悬念", "hook", "viral", "高能", "讨论")):
+        return "viral_hook"
+    if any(k in low for k in ("干货", "认知", "insight", "deep", "收藏", "提炼")):
+        return "deep_insight"
+    if any(k in low for k in ("卡拉ok", "karaoke", "口语", "双语", "bilingual", "听力")):
+        return "bilingual_karaoke"
+    if any(k in low for k in ("极简", "克制", "minimal", "crisp", "密度")):
+        return "crisp_minimal"
+    return "custom" if user_hint.strip() else "default"
+
+
 def _heuristic_copy_from_srt(
     bundle_name: str,
     teaser: str,
@@ -150,48 +163,104 @@ def _heuristic_copy_from_srt(
             s = sentences[idx]
             highlights.append(f"[{s['time_label']}] {s['text'][:68]}")
 
-    cn_title_base = (user_hint.strip() or clean_topic)[:16]
-    douyin_title = f"高能精剪：{cn_title_base}｜双语字幕"[:28]
-    shipinhao_short = re.sub(r"[^\w\u4e00-\u9fff ]", "", f"精剪 {cn_title_base}").strip()[:15]
+    mode = _detect_hint_mode(user_hint)
+    hint_clean = re.sub(r"\s+", " ", user_hint).strip()
+    cn_title_base = (hint_clean if mode == "custom" and len(hint_clean) <= 22 else clean_topic)[:16]
+    bullet_block = "\n".join(f"• {h}" for h in highlights[:3]) if highlights else ""
+
+    if mode == "viral_hook":
+        douyin_title = f"反常识真相：{cn_title_base}"[:28]
+        douyin_desc = f"前15秒直接抛结论！为什么大多数人都做反了？{duration_cn}原声高能对谈，你怎么看？评论区聊聊。"
+        douyin_tags = ["认知颠覆", "高能片段", "深度访谈", "思维碰撞", "中英双语"]
+        sp_short = f"反直觉 {cn_title_base}"
+        sp_title = f"开头15秒悬念：{cn_title_base}"[:28]
+        sp_desc = f"【{duration_cn}高能悬念版】把最反直觉的观点放在最前面，转发给同样关注这个话题的朋友。"
+        wb_title = f"前15秒高能反转｜{cn_title_base}"[:28]
+        wb_lead = f"#高能反转# #深度观点# 【{cn_title_base}｜开头即高潮】前15秒信息量拉满，看完有被震撼到："
+        x_lead = f"Wait for the opening twist: {hook_en}"
+        x_tail = f"The first 15s of this {duration_en} cut flip the usual narrative. Thoughts? #Insight #Highlights"
+    elif mode == "deep_insight":
+        douyin_title = f"建议收藏：{cn_title_base}核心干货"[:28]
+        douyin_desc = f"{duration_cn}纯干货浓缩！没有废话，建议点赞收藏，反复拆解里面的底层逻辑与关键洞察。"
+        douyin_tags = ["认知提升", "干货分享", "底层逻辑", "深度精选", "思维模型"]
+        sp_short = f"干货 {cn_title_base}"
+        sp_title = f"{cn_title_base}｜{duration_cn}认知干货"[:28]
+        sp_desc = f"{cn_title_base}（{duration_cn}核心精炼）：拆解最值得反复回看的三大关键结论，推荐收藏慢看。"
+        wb_title = f"{cn_title_base}｜核心认知干货笔记"[:28]
+        wb_lead = f"#认知提升# #干货笔记# 【{cn_title_base}｜{duration_cn}重点提炼】值得做笔记的三段高密度输出："
+        x_lead = f"Core takeaways from {clean_topic}: {hook_en}"
+        x_tail = f"Distilled into {duration_en} of pure signal—bookmark for later. #DeepDive #Takeaways"
+    elif mode == "bilingual_karaoke":
+        douyin_title = f"逐词跟读：{cn_title_base}原声精听"[:28]
+        douyin_desc = f"全程逐词高亮卡拉OK英文字幕！跟着{duration_cn}原声磨耳朵，地道表达和语调一次拿捏。"
+        douyin_tags = ["英语口语", "卡拉OK字幕", "中英双语", "英语精听", "地道表达"]
+        sp_short = f"双语精听 {cn_title_base}"
+        sp_title = f"双语卡拉OK精听：{cn_title_base}"[:28]
+        sp_desc = f"{cn_title_base}｜搭配逐词高亮英文字幕，{duration_cn}沉浸式练听力、学地道表达。"
+        wb_title = f"{cn_title_base}｜双语逐词精听"[:28]
+        wb_lead = f"#英语卡拉OK字幕# #地道口语# 【{cn_title_base}｜{duration_cn}原声精听】边听边跟读的高光片段："
+        x_lead = f"Synced word-by-word karaoke captions: {hook_en}"
+        x_tail = f"{duration_en} highlight cut with live highlighted captions for effortless listening. #Bilingual #Captions"
+    elif mode == "crisp_minimal":
+        douyin_title = f"{cn_title_base}｜{duration_cn}高光"[:28]
+        douyin_desc = f"{duration_cn}直入主题。只留最核心的一段原声与观点。"
+        douyin_tags = ["极简精选", "原声高光", "双语字幕", "重点速览"]
+        sp_short = f"速览 {cn_title_base}"
+        sp_title = f"{cn_title_base}（{duration_cn}精剪）"[:28]
+        sp_desc = f"{cn_title_base}｜{duration_cn}直击重点，配同步英文字幕。"
+        wb_title = f"{cn_title_base}｜{duration_cn}速览"[:28]
+        wb_lead = f"#精选速览# #双语字幕# 【{cn_title_base}】{duration_cn}核心看点："
+        x_lead = hook_en
+        x_tail = f"({duration_en} cut) #Highlights"
+    else:
+        angle_note = f"｜聚焦：{hint_clean[:18]}" if hint_clean else ""
+        douyin_title = f"高能精剪：{cn_title_base}｜双语字幕"[:28]
+        douyin_desc = f"开头高能预警！{duration_cn}浓缩全片精华{angle_note}，配逐词高亮英文字幕，建议收藏反复看。"
+        douyin_tags = ["中英双语", "英语口语", "深度精选", "卡拉OK字幕", "认知提升"]
+        sp_short = f"精剪 {cn_title_base}"
+        sp_title = douyin_title
+        sp_desc = f"{cn_title_base}（{duration_cn}精华版）{angle_note}｜片头前置全片最精彩观点，搭配动态高亮英文字幕，欢迎转发收藏。"
+        wb_title = f"{cn_title_base}｜双语高光精剪"[:28]
+        wb_lead = f"#双语精剪# #英语卡拉OK字幕# 【{cn_title_base}｜{duration_cn}核心高光】{angle_note}\n片头已提取最抓人的高能悬念，搭配逐词高亮卡拉OK英文字幕："
+        x_lead = f"🔥 {hook_en}"
+        x_tail = (
+            f"{hint_clean[:70]} — {duration_en} cut with live karaoke captions. 👇 #Highlights #Bilingual"
+            if hint_clean
+            else f"Cut down to the sharpest {duration_en} highlights with live word-by-word karaoke captions. 👇 #Highlights #Bilingual"
+        )
+
+    shipinhao_short = re.sub(r"[^\w\u4e00-\u9fff ]", "", sp_short).strip()[:15]
     if len(shipinhao_short) < 6:
         shipinhao_short = (shipinhao_short + " 深度精华版")[:15]
 
-    bullet_block = "\n".join(f"• {h}" for h in highlights[:3]) if highlights else ""
-    weibo_desc = (
-        f"#双语精剪# #英语卡拉OK字幕# 【{cn_title_base}｜{duration_cn}核心高光】\n"
-        f"片头已提取最抓人的高能悬念，搭配逐词高亮卡拉OK英文字幕，沉浸式听懂原声精髓！\n"
-        f"{bullet_block}".strip()
-    )
+    weibo_desc = f"{wb_lead}\n{bullet_block}".strip()
 
-    x_hook = hook_en if len(hook_en) <= 170 else hook_en[:167] + "..."
-    x_text = (
-        f"🔥 {x_hook}\n\n"
-        f"Cut down to the sharpest {duration_en} highlights with live word-by-word karaoke captions. 👇 #Highlights #Bilingual"
-    )
+    x_hook = x_lead if len(x_lead) <= 165 else x_lead[:162] + "..."
+    x_text = f"{x_hook}\n\n{x_tail}".strip()
     if len(x_text) > 275:
         x_text = x_text[:272] + "..."
 
     payload = {
         "douyin": {
             "title": douyin_title,
-            "description": f"开头高能预警！{duration_cn}浓缩全片精华，配逐词高亮英文字幕，建议收藏反复看。",
-            "tags": ["中英双语", "英语口语", "深度精选", "卡拉OK字幕", "认知提升"],
+            "description": douyin_desc,
+            "tags": douyin_tags,
         },
         "shipinhao": {
             "short_title": shipinhao_short,
-            "title": douyin_title,
-            "description": f"{cn_title_base}（{duration_cn}精华版）｜片头前置全片最精彩观点，搭配动态高亮英文字幕，欢迎转发收藏。",
+            "title": sp_title,
+            "description": sp_desc,
             "tags": ["双语字幕", "深度访谈", "英语学习", "认知升级"],
         },
         "weibo": {
-            "title": f"{cn_title_base}｜双语高光精剪"[:28],
+            "title": wb_title,
             "description": weibo_desc,
             "tags": ["双语精剪", "英语学习", "海外视野"],
         },
         "x": {
             "text": x_text,
             "long_note": (
-                f"🔥 {hook_en}\n\n"
+                f"{x_hook}\n\n"
                 f"Key moments in this {duration_en} highlight cut:\n"
                 f"{bullet_block}\n\n"
                 "Synced with karaoke-highlighted subtitles for effortless watching."

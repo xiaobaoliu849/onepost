@@ -10,6 +10,7 @@ Solves platform QR risk-control ('status not good') permanently by:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import subprocess
@@ -24,6 +25,7 @@ CDP_PORT = 9333
 CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 STUDIO_CHROME_PROFILE = DATA_DIR / "studio_chrome_profile"
 OPEN_CHROME_BAT = PROJECT_ROOT / "open_chrome.bat"
+_CDP_SYNC_LOCK = asyncio.Lock()
 
 PLATFORM_URLS = {
     "douyin": "https://creator.douyin.com/creator-micro/home",
@@ -210,25 +212,26 @@ async def sync_login_from_studio_chrome() -> dict[str, Any]:
     accounts = settings.get("accounts") or {}
     synced: list[str] = []
 
-    async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp(CDP_URL)
-        if not browser.contexts:
-            return {
-                "chrome_running": True,
-                "synced_platforms": [],
-                "message": "Chrome is open, no active profile context found.",
-            }
-        context = browser.contexts[0]
-        state_dict = await context.storage_state()
-        all_cookies = state_dict.get("cookies") or []
-        open_urls = [pg.url or "" for pg in context.pages]
+    async with _CDP_SYNC_LOCK:
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
+            if not browser.contexts:
+                return {
+                    "chrome_running": True,
+                    "synced_platforms": [],
+                    "message": "Chrome is open, no active profile context found.",
+                }
+            context = browser.contexts[0]
+            state_dict = await context.storage_state()
+            all_cookies = state_dict.get("cookies") or []
+            open_urls = [pg.url or "" for pg in context.pages]
 
-        for plat in ("douyin", "shipinhao", "weibo", "x"):
-            if _has_platform_auth(plat, all_cookies, open_urls):
-                acc = accounts.get(plat, "creator")
-                out_file = get_platform_cookie_path(plat, acc)
-                out_file.write_text(json.dumps(state_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-                synced.append(plat)
+            for plat in ("douyin", "shipinhao", "weibo", "x"):
+                if _has_platform_auth(plat, all_cookies, open_urls):
+                    acc = accounts.get(plat, "creator")
+                    out_file = get_platform_cookie_path(plat, acc)
+                    out_file.write_text(json.dumps(state_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+                    synced.append(plat)
 
     return {
         "chrome_running": True,
@@ -241,6 +244,25 @@ async def sync_login_from_studio_chrome() -> dict[str, Any]:
     }
 
 
+def _safe_parse_expiry(val: Any) -> float:
+    if val is None or isinstance(val, bool):
+        return -1
+    try:
+        parsed = float(val)
+        return parsed if parsed > 0 else -1
+    except (TypeError, ValueError):
+        return -1
+
+
+def _normalize_windows_curl_escapes(text: str) -> str:
+    """Undo Windows CMD `Copy as cURL` caret-escaping (^\", ^&, ^%, ^^) if present."""
+    if "^" not in text:
+        return text
+    cleaned = text.replace("^\r\n", " ").replace("^\n", " ")
+    cleaned = re.sub(r'\^([&|^<>%"\'=;])', r"\1", cleaned)
+    return cleaned
+
+
 def import_cookies_from_text(platform: str, raw_text: str, account: str = "creator") -> Path:
     """Universal importer for cookies copied from ANY everyday Chrome window!
     Accepts:
@@ -249,6 +271,9 @@ def import_cookies_from_text(platform: str, raw_text: str, account: str = "creat
     3. `Copy as cURL (bash / cmd)` from Chrome DevTools Network tab
     4. Raw `Cookie: key=val; key2=val2` header text
     """
+    if platform not in PLATFORM_DOMAINS:
+        raise ValueError(f"Unsupported platform: {platform}")
+
     text = raw_text.strip()
     if not text:
         raise ValueError("Please paste your Cookie JSON, cURL command, or Cookie header string.")
@@ -281,23 +306,25 @@ def import_cookies_from_text(platform: str, raw_text: str, account: str = "creat
                     "value": str(item.get("value", "")),
                     "domain": str(item.get("domain") or default_domain),
                     "path": str(item.get("path") or "/"),
-                    "expires": float(exp) if exp and float(exp) > 0 else -1,
+                    "expires": _safe_parse_expiry(exp),
                     "httpOnly": bool(item.get("httpOnly", False)),
                     "secure": bool(item.get("secure", True)),
                     "sameSite": same_site_raw,
                 }
             )
     else:
-        # Case 3: Copy as cURL -> extract -b '...' or -H 'cookie: ...'
-        cookie_str = text
-        curl_b = re.search(r"""(?:-b|--cookie)\s+['"\^]*([^'"\r\n]+)['"\^]*""", text, re.IGNORECASE)
-        curl_h = re.search(r"""cookie:\s*([^'"\r\n]+)""", text, re.IGNORECASE)
+        # Case 3: Copy as cURL (bash or Windows cmd) -> extract -b '...' or -H 'cookie: ...'
+        normalized = _normalize_windows_curl_escapes(text)
+        cookie_str = normalized
+        curl_b = re.search(r"""(?:-b|--cookie)\s+["']([^"'\r\n]+)["']""", normalized, re.IGNORECASE)
+        curl_h = re.search(r"""-H\s+["']cookie:\s*([^"'\r\n]+)["']""", normalized, re.IGNORECASE)
+        plain_h = re.search(r"""^cookie:\s*([^\r\n]+)""", normalized, re.IGNORECASE | re.MULTILINE)
         if curl_b:
             cookie_str = curl_b.group(1)
         elif curl_h:
             cookie_str = curl_h.group(1)
-        elif cookie_str.lower().startswith("cookie:"):
-            cookie_str = cookie_str.split(":", 1)[1].strip()
+        elif plain_h:
+            cookie_str = plain_h.group(1).strip()
 
         for pair in cookie_str.split(";"):
             pair = pair.strip()

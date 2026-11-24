@@ -99,8 +99,8 @@ def parse_subtitle_file(path: Path) -> dict[str, Any]:
         "cue_count": len(cues),
         "sentence_count": len(consolidated_lines),
         "teaser_hook_text": " ".join(teaser_lines).strip(),
-        "sentences": consolidated_lines[:120],
-        "cues": [asdict(c) for c in cues[:800]],
+        "sentences": consolidated_lines[:300],
+        "cues": [asdict(c) for c in cues[:2500]],
         "transcript_excerpt": full_transcript[:6000],
     }
 

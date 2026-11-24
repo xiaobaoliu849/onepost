@@ -8,6 +8,7 @@ Automatically discovers:
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
@@ -20,22 +21,85 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 SUBTITLE_EXTS = {".srt", ".ass", ".ssa", ".vtt"}
 
+MAX_WEIBO_COVER_BYTES = 4_500_000
+
+
+def _format_duration_label(sec: float) -> str:
+    if sec <= 0:
+        return "Ready to publish"
+    total = int(round(sec))
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def _infer_aspect_label(width: int, height: int, fallback: str) -> str:
+    if width <= 0 or height <= 0:
+        return fallback
+    ratio = width / height
+    known = [
+        (16 / 9, "16:9"),
+        (9 / 16, "9:16"),
+        (4 / 3, "4:3"),
+        (3 / 4, "3:4"),
+        (1.0, "1:1"),
+    ]
+    for target, label in known:
+        if abs(ratio - target) < 0.06:
+            return label
+    g = math.gcd(width, height)
+    rw, rh = width // g, height // g
+    if rw <= 32 and rh <= 32:
+        return f"{rw}:{rh}"
+    return f"{width}x{height}"
+
 
 def probe_video_metadata(video_path: Path) -> dict[str, Any]:
-    """Read ready-to-publish video file metadata without running FFmpeg."""
+    """Read ready-to-publish video file metadata (dimensions, FPS, duration) without running FFmpeg."""
     size_bytes = video_path.stat().st_size
     size_mb = round(size_bytes / (1024 * 1024), 2)
+    width = 0
+    height = 0
+    fps = 0.0
+    duration_sec = 0.0
+
+    try:
+        import cv2  # type: ignore
+
+        cap = cv2.VideoCapture(str(video_path))
+        try:
+            if cap.isOpened():
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+                fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+                frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+                if fps > 0 and frames > 0:
+                    duration_sec = round(frames / fps, 2)
+        finally:
+            cap.release()
+    except Exception:
+        pass
+
+    ext_label = video_path.suffix.upper().lstrip(".")
+    aspect_label = _infer_aspect_label(width, height, ext_label)
+    duration_label = _format_duration_label(duration_sec)
+    x_std_ok = size_mb <= 512.0 and (duration_sec <= 140.0 or duration_sec == 0.0)
+
     info: dict[str, Any] = {
         "file_name": video_path.name,
         "file_path": str(video_path.resolve()),
         "size_bytes": size_bytes,
         "size_mb": size_mb,
-        "duration_sec": 0.0,
-        "duration_label": "Ready to publish",
-        "width": 0,
-        "height": 0,
-        "aspect_label": video_path.suffix.upper().lstrip("."),
-        "x_standard_compatible": size_mb <= 512.0,
+        "duration_sec": duration_sec,
+        "duration_label": duration_label,
+        "width": width,
+        "height": height,
+        "fps": round(fps, 2) if fps > 0 else 0.0,
+        "aspect_label": aspect_label,
+        "x_standard_compatible": x_std_ok,
         "x_premium_compatible": size_mb <= 16384.0,
         "warnings": [],
     }
@@ -43,13 +107,17 @@ def probe_video_metadata(video_path: Path) -> dict[str, Any]:
         info["warnings"].append(
             f"Video is {size_mb} MB: X Standard accounts cap at 512 MB (X Premium supports up to 16 GB)."
         )
+    if duration_sec > 140.0:
+        info["warnings"].append(
+            f"Video is {duration_label} ({int(round(duration_sec))}s): X Standard caps at 2:20 (140s); enable X Premium for 3–5m+ videos."
+        )
     return info
 
 
 def prepare_cover_variants(
     poster_path: Path | None, video_path: Path | None = None
 ) -> dict[str, str | None]:
-    """Prepare 3:4 portrait & 4:3 landscape cover variants (< 4.5MB JPG) from your Poster Card
+    """Prepare 3:4 portrait, 4:3 landscape & 16:9 Weibo cover variants (< 4.5MB JPG) from your Poster Card
     so Douyin, Shipinhao, and Weibo receive exact platform cover ratios without cropping text.
     """
     source_image = poster_path
@@ -60,32 +128,53 @@ def prepare_cover_variants(
             "landscape_4x3": None,
             "weibo_cover": None,
         }
-    digest = hashlib.md5(str(source_image.resolve()).encode("utf-8")).hexdigest()[:10]
+
+    resolved = source_image.resolve()
+    stat = resolved.stat()
+    cache_key = f"{resolved}|{stat.st_mtime_ns}|{stat.st_size}"
+    digest = hashlib.md5(cache_key.encode("utf-8")).hexdigest()[:12]
 
     portrait_out = COVERS_CACHE_DIR / f"{digest}_portrait_3x4.jpg"
     landscape_out = COVERS_CACHE_DIR / f"{digest}_landscape_4x3.jpg"
     weibo_out = COVERS_CACHE_DIR / f"{digest}_weibo_16x9.jpg"
 
+    # Skip re-rendering if cached covers for this exact file version already exist
+    if all(p.is_file() and p.stat().st_size > 0 for p in (portrait_out, landscape_out, weibo_out)):
+        return {
+            "original": str(resolved),
+            "portrait_3x4": str(portrait_out.resolve()),
+            "landscape_4x3": str(landscape_out.resolve()),
+            "weibo_cover": str(weibo_out.resolve()),
+        }
+
     try:
-        with Image.open(source_image) as img:
+        with Image.open(resolved) as img:
             rgb = img.convert("RGB")
             _render_smart_canvas(rgb, (1080, 1440), portrait_out)
             _render_smart_canvas(rgb, (1440, 1080), landscape_out)
             _render_smart_canvas(rgb, (1920, 1080), weibo_out)
     except Exception:
         return {
-            "original": str(source_image.resolve()),
-            "portrait_3x4": str(source_image.resolve()),
-            "landscape_4x3": str(source_image.resolve()),
-            "weibo_cover": str(source_image.resolve()),
+            "original": str(resolved),
+            "portrait_3x4": str(resolved),
+            "landscape_4x3": str(resolved),
+            "weibo_cover": str(resolved),
         }
 
     return {
-        "original": str(source_image.resolve()),
+        "original": str(resolved),
         "portrait_3x4": str(portrait_out.resolve()),
         "landscape_4x3": str(landscape_out.resolve()),
         "weibo_cover": str(weibo_out.resolve()),
     }
+
+
+def _save_capped_jpeg(img: Image.Image, out_path: Path) -> None:
+    """Save JPEG keeping file size under 4.5 MB (Weibo requires < 5 MB)."""
+    for q in (92, 84, 75, 65):
+        img.save(out_path, format="JPEG", quality=q, optimize=True)
+        if out_path.stat().st_size <= MAX_WEIBO_COVER_BYTES:
+            return
 
 
 def _render_smart_canvas(img: Image.Image, target_size: tuple[int, int], out_path: Path) -> None:
@@ -99,7 +188,7 @@ def _render_smart_canvas(img: Image.Image, target_size: tuple[int, int], out_pat
 
     if abs(src_ratio - dst_ratio) < 0.08:
         fitted = img.resize((tw, th), Image.Resampling.LANCZOS)
-        fitted.save(out_path, format="JPEG", quality=92, optimize=True)
+        _save_capped_jpeg(fitted, out_path)
         return
 
     # Blurred fill background
@@ -115,10 +204,10 @@ def _render_smart_canvas(img: Image.Image, target_size: tuple[int, int], out_pat
     fg_w, fg_h = int(sw * scale_fg), int(sh * scale_fg)
     fg = img.resize((fg_w, fg_h), Image.Resampling.LANCZOS)
     bg.paste(fg, ((tw - fg_w) // 2, (th - fg_h) // 2))
-    bg.save(out_path, format="JPEG", quality=92, optimize=True)
+    _save_capped_jpeg(bg, out_path)
 
 
-def _score_video_candidate(p: Path) -> tuple[int, int]:
+def score_video_candidate(p: Path) -> tuple[int, int]:
     name = p.stem.lower()
     score = 0
     for kw in ("final", "highlight", "karaoke", "sub", "out", "publish", "cut", "teaser", "short"):
@@ -130,7 +219,7 @@ def _score_video_candidate(p: Path) -> tuple[int, int]:
     return (score, p.stat().st_size)
 
 
-def _score_poster_candidate(p: Path) -> int:
+def score_poster_candidate(p: Path) -> int:
     name = p.stem.lower()
     score = 0
     for kw in ("poster", "cover", "card", "thumb", "thumbnail", "封面", "海报"):
@@ -139,7 +228,7 @@ def _score_poster_candidate(p: Path) -> int:
     return score
 
 
-def _score_subtitle_candidate(p: Path) -> int:
+def score_subtitle_candidate(p: Path) -> int:
     name = p.stem.lower()
     score = 0
     for kw in ("karaoke", "en", "bilingual", "highlight", "final", "sub"):
@@ -148,6 +237,11 @@ def _score_subtitle_candidate(p: Path) -> int:
     if p.suffix.lower() in (".srt", ".ass"):
         score += 5
     return score
+
+
+_score_video_candidate = score_video_candidate
+_score_poster_candidate = score_poster_candidate
+_score_subtitle_candidate = score_subtitle_candidate
 
 
 def scan_bundle_directory(folder_path: str | Path) -> dict[str, Any]:

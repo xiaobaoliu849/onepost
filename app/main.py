@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import shutil
 import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
@@ -20,6 +22,9 @@ from app.asset_scanner import (
     VIDEO_EXTS,
     build_bundle_manifest,
     scan_bundle_directory,
+    score_poster_candidate,
+    score_subtitle_candidate,
+    score_video_candidate,
 )
 from app.chrome_bridge import (
     import_cookies_from_text,
@@ -233,8 +238,14 @@ async def api_scan_folder(req: ScanFolderRequest) -> dict[str, Any]:
 async def api_upload_bundle(
     files: list[UploadFile] = File(...),
     bundle_title: str = Form(default=""),
+    existing_video: str = Form(default=""),
+    existing_poster: str = Form(default=""),
+    existing_subtitle: str = Form(default=""),
 ) -> dict[str, Any]:
-    """Allow dragging & dropping Video + Poster Card + Karaoke SRT directly into the browser."""
+    """Allow dragging & dropping Video + Poster Card + Karaoke SRT directly into the browser.
+    Streams uploads in 1 MB chunks, scores multi-file drops, rejects unsupported-only drops cleanly,
+    and optionally preserves untouched asset slots (`existing_*`) during single-slot replacement.
+    """
     stamp = time.strftime("%Y%m%d_%H%M%S")
     safe_label = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (bundle_title or "bundle"))[:32]
     target_dir = UPLOADS_STAGING_DIR / f"{stamp}_{safe_label}"
@@ -243,34 +254,80 @@ async def api_upload_bundle(
     saved_videos: list[Path] = []
     saved_posters: list[Path] = []
     saved_subs: list[Path] = []
+    ignored_files: list[str] = []
 
-    for uf in files:
-        if not uf.filename:
-            continue
-        fname = Path(uf.filename).name
-        dest = target_dir / fname
-        with dest.open("wb") as out_f:
-            shutil.copyfileobj(uf.file, out_f)
-        ext = dest.suffix.lower()
-        if ext in VIDEO_EXTS:
-            saved_videos.append(dest)
-        elif ext in IMAGE_EXTS:
-            saved_posters.append(dest)
-        elif ext in SUBTITLE_EXTS:
-            saved_subs.append(dest)
+    try:
+        for uf in files:
+            if not uf.filename:
+                continue
+            fname = Path(uf.filename).name
+            ext = Path(fname).suffix.lower()
+            if ext not in (VIDEO_EXTS | IMAGE_EXTS | SUBTITLE_EXTS):
+                ignored_files.append(fname)
+                await uf.close()
+                continue
 
-    bundle = build_bundle_manifest(
-        folder=target_dir,
-        video_path=saved_videos[0] if saved_videos else None,
-        poster_path=saved_posters[0] if saved_posters else None,
-        subtitle_path=saved_subs[0] if saved_subs else None,
-        all_videos=saved_videos,
-        all_posters=saved_posters,
-        all_subtitles=saved_subs,
-    )
-    settings = load_settings()
-    copy_draft = await generate_platform_copy(bundle, settings, user_hint=bundle_title)
-    return {"bundle": bundle, "copy": copy_draft}
+            dest = target_dir / fname
+            with dest.open("wb") as out_f:
+                while chunk := await uf.read(1024 * 1024):
+                    out_f.write(chunk)
+            await uf.close()
+
+            if ext in VIDEO_EXTS:
+                saved_videos.append(dest)
+            elif ext in IMAGE_EXTS:
+                saved_posters.append(dest)
+            elif ext in SUBTITLE_EXTS:
+                saved_subs.append(dest)
+
+        if not (saved_videos or saved_posters or saved_subs):
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=400,
+                detail="No supported video (.mp4/.mov/.mkv/.webm), image (.png/.jpg/.webp), or subtitle (.srt/.ass/.vtt) files were uploaded.",
+            )
+
+        # Preserve existing untouched slots when user drops/replaces a single file type
+        def _keep_existing(raw_path: str) -> Path | None:
+            if not raw_path or not raw_path.strip():
+                return None
+            p = Path(raw_path).expanduser().resolve()
+            return p if p.is_file() else None
+
+        if not saved_videos:
+            kept_v = _keep_existing(existing_video)
+            if kept_v:
+                saved_videos.append(kept_v)
+        if not saved_posters:
+            kept_p = _keep_existing(existing_poster)
+            if kept_p:
+                saved_posters.append(kept_p)
+        if not saved_subs:
+            kept_s = _keep_existing(existing_subtitle)
+            if kept_s:
+                saved_subs.append(kept_s)
+
+        saved_videos.sort(key=score_video_candidate, reverse=True)
+        saved_posters.sort(key=score_poster_candidate, reverse=True)
+        saved_subs.sort(key=score_subtitle_candidate, reverse=True)
+
+        bundle = build_bundle_manifest(
+            folder=target_dir,
+            video_path=saved_videos[0] if saved_videos else None,
+            poster_path=saved_posters[0] if saved_posters else None,
+            subtitle_path=saved_subs[0] if saved_subs else None,
+            all_videos=saved_videos,
+            all_posters=saved_posters,
+            all_subtitles=saved_subs,
+        )
+        settings = load_settings()
+        copy_draft = await generate_platform_copy(bundle, settings, user_hint=bundle_title)
+        return {"bundle": bundle, "copy": copy_draft, "ignored_files": ignored_files}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/bundle/demo")
@@ -320,6 +377,51 @@ async def api_load_demo_bundle() -> dict[str, Any]:
     return {"bundle": bundle, "copy": copy_draft}
 
 
+class AiTestRequest(BaseModel):
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+
+
+@app.post("/api/ai/test")
+async def api_test_ai_connection(req: AiTestRequest | None = None) -> dict[str, Any]:
+    """Verify configured OpenAI-compatible AI copywriter endpoint & credentials."""
+    settings = load_settings()
+    ai_cfg = settings.get("ai") or {}
+    base_url = ((req.base_url if req and req.base_url is not None else ai_cfg.get("base_url")) or "https://api.deepseek.com/v1").strip().rstrip("/")
+    api_key = ((req.api_key if req and req.api_key is not None else ai_cfg.get("api_key")) or "").strip()
+    model = ((req.model if req and req.model is not None else ai_cfg.get("model")) or "deepseek-chat").strip()
+
+    if not api_key:
+        return {
+            "ok": False,
+            "message": "No API key provided — built-in Smart SRT Composer will be used offline.",
+        }
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{base_url}/models", headers=headers)
+            if resp.status_code in (404, 405):
+                chat_resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "max_tokens": 5,
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
+                )
+                chat_resp.raise_for_status()
+            else:
+                resp.raise_for_status()
+        return {"ok": True, "message": f"Connected to {base_url} (model: {model})"}
+    except httpx.HTTPStatusError as exc:
+        return {"ok": False, "message": f"Endpoint rejected request (HTTP {exc.response.status_code}). Check API key, base URL, or model name."}
+    except Exception as exc:
+        return {"ok": False, "message": f"Connection failed: {exc}"}
+
+
 @app.post("/api/copy/generate")
 async def api_generate_copy(req: GenerateCopyRequest) -> dict[str, Any]:
     settings = load_settings()
@@ -361,7 +463,7 @@ async def api_get_job(job_id: str) -> dict[str, Any]:
 
 @app.get("/api/media")
 async def api_stream_local_media(path: str, request: Request):
-    """Serve local video/poster files with HTTP Range support for smooth video scrubbing."""
+    """Serve local video/poster files with RFC-compliant HTTP Range support for smooth video scrubbing."""
     target = Path(path).expanduser().resolve()
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Media file not found")
@@ -373,15 +475,35 @@ async def api_stream_local_media(path: str, request: Request):
     file_size = target.stat().st_size
     range_header = request.headers.get("range")
 
-    if not range_header or target.suffix.lower() not in VIDEO_EXTS:
+    if file_size == 0 or not range_header or target.suffix.lower() not in VIDEO_EXTS:
         return FileResponse(target, media_type=media_type)
 
-    # Parse Range: bytes=start-end
-    byte_range = range_header.strip().lower().replace("bytes=", "")
-    start_str, _, end_str = byte_range.partition("-")
-    start = int(start_str) if start_str else 0
-    end = int(end_str) if end_str else min(start + 2 * 1024 * 1024, file_size - 1)
-    end = min(end, file_size - 1)
+    # Parse Range: bytes=start-end | bytes=start- | bytes=-suffix
+    m = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip().lower())
+    if not m or (not m.group(1) and not m.group(2)):
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+
+    start_str, end_str = m.group(1), m.group(2)
+    if not start_str:
+        suffix_len = int(end_str)
+        if suffix_len <= 0:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+        start = max(0, file_size - suffix_len)
+        end = file_size - 1
+    else:
+        start = int(start_str)
+        end = int(end_str) if end_str else min(start + 2 * 1024 * 1024 - 1, file_size - 1)
+        end = min(end, file_size - 1)
+
+    if start < 0 or start >= file_size or start > end:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+
     chunk_len = (end - start) + 1
 
     def iter_chunk():
